@@ -1,0 +1,9 @@
+.venv/
+build/
+dist/
+chrome_profile/
+__pycache__/
+*.log
+cli_log.txt
+*.pfx
+*.bak*
