@@ -2,10 +2,14 @@ name: Windows 빌드
 
 on:
   workflow_dispatch:
+    inputs:
+      release:
+        description: "빌드한 exe로 v<APP_VERSION> 릴리스 만들기"
+        type: boolean
+        default: false
   push:
     branches: ["claude/**"]
     paths: ["맞춤돌봄도우미.py", "icon.ico", ".github/workflows/build.yml"]
-    tags: ["v*"]
 
 permissions:
   contents: write
@@ -30,10 +34,12 @@ jobs:
         with:
           name: CareHelper-${{ env.VER }}
           path: dist/CareHelper-${{ env.VER }}.exe
-      - name: 릴리스 만들기 (v* 태그일 때)
-        if: startsWith(github.ref, 'refs/tags/v')
+      - name: 릴리스 만들기 (수동 실행에서 release 를 켰을 때)
+        if: inputs.release
         uses: softprops/action-gh-release@v2
         with:
-          name: ${{ github.ref_name }}
+          tag_name: v${{ env.VER }}
+          target_commitish: ${{ github.sha }}
+          name: v${{ env.VER }}
           body_path: RELEASE_NOTES.md
           files: dist/CareHelper-${{ env.VER }}.exe
