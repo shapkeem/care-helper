@@ -117,6 +117,10 @@ def open_plan(page, ic_name, year, month):
     """지원사 행의 해당 월 [작성] 을 눌러 일정 창을 연다. 이미 열려 있으면 그대로 쓴다."""
     key = f"{ic_name}|{year}|{month}"
     if _reuse(page, "__ch_plan", key, "#DIV_LAYER #TBL_PLAN"):
+        # 저장은 그 달 일정 전체를 보내므로, 다시 쓸 때는 서버 최신 내용으로 새로 그린다
+        # (그 사이 다른 사람이 바꾼 내용, 앞에서 추가만 하고 저장 못 한 칸이 섞이지 않게)
+        page.evaluate("() => LoadIljungData()")
+        _settle(page, 300)
         return
     page.goto(PLAN_URL)
     page.wait_for_load_state()
@@ -220,6 +224,14 @@ def delete_plan(page, plan):
             return
         page.wait_for_timeout(100)
     raise WorkError("일정이 지워지지 않았어요.")
+
+
+def forget_screens(page):
+    """새 요청을 시작할 때 부른다. 화면 다시 쓰기는 한 요청 안에서만 한다."""
+    try:
+        page.evaluate("() => { window.__ch_plan = null; window.__ch_rst = null; }")
+    except Exception:
+        pass
 
 
 def close_layer(page):

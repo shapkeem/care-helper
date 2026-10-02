@@ -42,6 +42,7 @@ def ask_kind(ask, it):
 
 def run_item(page, dlg, it, ask, log, now=None):
     now = now or datetime.now()
+    g.forget_screens(page)
     if not it.person:
         raise WorkError("대상자를 찾지 못했어요.")
     if it.action in ("실적", "일정등록"):
