@@ -67,9 +67,24 @@ def chrome_mode():
         return None
     try:
         with open(CHROME_MODE_PATH, encoding="utf-8") as f:
-            return "hidden" if f.read().strip() == "hidden" else "window"
+            return "hidden" if f.read().split()[:1] == ["hidden"] else "window"
     except OSError:
         return "window"
+
+
+def kill_hidden_chrome_now():
+    """프로그램을 닫을 때: 켤 때 기억해 둔 프로세스 번호로 백그라운드 크롬을 바로 끈다.
+    (Playwright 를 새로 켜서 종료 명령을 보내면 1~2초 걸려 창이 늦게 닫힘) 기다리지 않는다."""
+    try:
+        with open(CHROME_MODE_PATH, encoding="utf-8") as f:
+            parts = f.read().split()
+    except OSError:
+        return
+    if len(parts) == 2 and parts[0] == "hidden" and parts[1].isdigit() and chrome_debug_alive():
+        # 번호가 다른 프로그램에 다시 쓰였을 수 있으니 chrome.exe 일 때만
+        subprocess.Popen(["taskkill", "/F", "/T", "/FI", "IMAGENAME eq chrome.exe", "/PID", parts[1]],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                         creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
 
 def _normal_user_agent(exe):
@@ -99,10 +114,10 @@ def open_chrome(hidden=False):
         ua = _normal_user_agent(exe)
         if ua:
             args.append(f"--user-agent={ua}")
-    subprocess.Popen(args + [SITE + "/"])
+    proc = subprocess.Popen(args + [SITE + "/"])
     try:
         with open(CHROME_MODE_PATH, "w", encoding="utf-8") as f:
-            f.write("hidden" if hidden else "window")
+            f.write(f"hidden {proc.pid}" if hidden else "window")
     except OSError:
         pass
     return True
@@ -1333,11 +1348,7 @@ def main_gui():
     def on_close():
         # 백그라운드 크롬은 눈에 안 보이니 프로그램을 닫을 때 같이 끈다
         cancel_chrome_close()
-        try:
-            if chrome_mode() == "hidden":
-                close_chrome()
-        except Exception:
-            pass
+        kill_hidden_chrome_now()  # 기다리지 않음 (창이 바로 닫히게)
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)

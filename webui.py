@@ -417,11 +417,7 @@ class Api:
     def _close_chrome(self):
         a = self._app
         a.cancel_chrome_close()
-        try:
-            if a.chrome_mode() == "hidden":
-                a.close_chrome()
-        except Exception:
-            pass
+        a.kill_hidden_chrome_now()  # 기다리지 않음 (창이 바로 닫히게)
 
 
 def start(app):
