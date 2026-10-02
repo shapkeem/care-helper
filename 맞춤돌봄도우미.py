@@ -920,7 +920,7 @@ def main_gui():
     # ---- 아래쪽
     foot = tk.Frame(outer, bg=C_BG)
     foot.pack(fill="x", pady=(8, 0))
-    tk.Label(foot, text="결과는 업무\\일일실적 폴더에 저장돼요", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="left")
+    tk.Label(foot, text="결과는 바탕 화면 › 업무 › 일일실적 폴더에 저장돼요", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="left")
     ver_label = tk.Label(foot, text=f"v{APP_VERSION} · 업데이트 확인", font=F(9), bg=C_BG, fg=C_MUTED,
                          cursor="hand2")
     ver_label.pack(side="right")
