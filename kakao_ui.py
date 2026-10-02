@@ -33,29 +33,31 @@ def load_roster(app, page, log):
     return rows
 
 
-def open_window(root, RoundButton, F, busy, app):
+def build_page(parent, RoundButton, F, busy, app):
+    """메인 창 오른쪽에 들어갈 '카톡 요청 처리' 화면을 만들어 돌려준다."""
     import tkinter as tk
     from tkinter import ttk
 
     jev.KEY_LOADER = app.load_jev_key
     C_BG, C_TEXT, C_MUTED, C_CARD = app.C_BG, app.C_TEXT, app.C_MUTED, app.C_CARD
-    win = tk.Toplevel(root)
-    win.title("카톡 요청 처리")
-    win.geometry("980x820")
-    win.configure(bg=C_BG)
-    outer = tk.Frame(win, bg=C_BG, padx=18, pady=14)
+    win = tk.Frame(parent, bg=C_BG)
+    outer = tk.Frame(win, bg=C_BG)
     outer.pack(fill="both", expand=True)
 
-    tk.Label(outer, text="카톡 요청 처리", font=F(15, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
-    tk.Label(outer, text="생활지원사 카톡을 복사해서 붙여넣고 '처리 시작'을 누르세요. 애매한 건 아래에서 물어볼게요.",
-             font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w", pady=(2, 8))
+    head = tk.Frame(outer, bg=C_BG)
+    head.pack(fill="x")
+    titles = tk.Frame(head, bg=C_BG)
+    titles.pack(side="left")
+    tk.Label(titles, text="카톡 요청 처리", font=F(17, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
+    tk.Label(titles, text="생활지원사 카톡을 붙여넣으면 알아서 처리해요. 애매한 건 물어볼게요.",
+             font=F(10), bg=C_BG, fg=C_MUTED).pack(anchor="w", pady=(0, 10))
     txt = tk.Text(outer, height=8, font=F(10), relief="solid", bd=1, wrap="word")
     txt.pack(fill="x")
+    status = tk.Label(outer, text="", font=F(9), bg=C_BG, fg=C_MUTED, anchor="w")
+    status.pack(fill="x", pady=(6, 8))
 
-    bar = tk.Frame(outer, bg=C_BG)
-    bar.pack(fill="x", pady=8)
-    status = tk.Label(bar, text="", font=F(9), bg=C_BG, fg=C_MUTED, anchor="w")
-    status.pack(side="left", fill="x", expand=True)
+    bar = tk.Frame(head, bg=C_BG)
+    bar.pack(side="right", anchor="n")
     state = {"running": False, "stop": False}
     answers = queue.Queue()
 
@@ -90,9 +92,9 @@ def open_window(root, RoundButton, F, busy, app):
 
     # ---- 항목 목록 + 기록
     tree = ttk.Treeview(outer, columns=("req", "st", "note"), show="headings", height=12)
-    for c, t, w in (("req", "요청", 470), ("st", "상태", 90), ("note", "메모", 360)):
+    for c, t, w in (("req", "요청", 400), ("st", "상태", 80), ("note", "메모", 250)):
         tree.heading(c, text=t)
-        tree.column(c, width=w, anchor="w")
+        tree.column(c, width=w, minwidth=60, anchor="w", stretch=(c != "st"))
     tree.tag_configure("완료", foreground="#166534")
     tree.tag_configure("확인 필요", foreground="#B91C1C")
     tree.tag_configure("사람 처리", foreground="#92400E")
@@ -145,7 +147,6 @@ def open_window(root, RoundButton, F, busy, app):
                                                                      padx=(0, 6), pady=2)
             qbox.pack(fill="x", pady=(0, 8), before=tree)
             q_entry.focus_set()
-            win.lift()
         ui(put)
 
     def ask_user(question, options):
@@ -243,9 +244,4 @@ def open_window(root, RoundButton, F, busy, app):
     RoundButton(bar, "멈춤", stop, height=34, padx=14, size=9).pack(side="right")
     RoundButton(bar, "처리 시작", start, kind="primary", height=34, padx=16, size=9).pack(side="right", padx=(0, 6))
 
-    def on_close():
-        if state["running"]:
-            state["stop"] = True
-            answers.put(None)
-        win.destroy()
-    win.protocol("WM_DELETE_WINDOW", on_close)
+    return win

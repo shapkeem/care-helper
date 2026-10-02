@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "1.2.2"
+APP_VERSION = "1.3.0"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -725,6 +725,9 @@ C_PRIMARY = "#2563EB"
 C_PRIMARY_H = "#1D4ED8"
 C_DANGER_BG = "#FEE2E2"
 C_DANGER = "#B91C1C"
+C_SIDE = "#F8FAFC"
+C_SIDE_HOVER = "#EEF2F6"
+C_SIDE_ON = "#E2E8F0"
 FONT = "맑은 고딕"
 
 STATUS_STYLE = {  # 상태: (배경, 글자, 문구)
@@ -790,11 +793,6 @@ def _make_round_button_class(tk, tkfont):
     return RoundButton
 
 
-def open_kakao_window(root, RoundButton, F, busy):
-    import kakao_ui
-    kakao_ui.open_window(root, RoundButton, F, busy, sys.modules[__name__])
-
-
 def main_gui():
     import tkinter as tk
     from tkinter import font as tkfont, messagebox, ttk
@@ -808,8 +806,8 @@ def main_gui():
 
     root = tk.Tk()
     root.title(APP_NAME)
-    root.geometry("760x820")
-    root.minsize(680, 640)
+    root.geometry("1000x820")
+    root.minsize(900, 640)
     root.configure(bg=C_BG)
     icon = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "icon.ico")
     try:
@@ -825,8 +823,57 @@ def main_gui():
     def F(size, bold=False):
         return tkfont.Font(family=FONT, size=size, weight="bold" if bold else "normal")
 
-    outer = tk.Frame(root, bg=C_BG)
-    outer.pack(fill="both", expand=True, padx=24, pady=(18, 10))
+    # ================= 왼쪽 메뉴 =================
+    side = tk.Frame(root, bg=C_SIDE, width=200)
+    side.pack(side="left", fill="y")
+    side.pack_propagate(False)
+    tk.Frame(root, bg=C_LINE, width=1).pack(side="left", fill="y")
+    content = tk.Frame(root, bg=C_BG)
+    content.pack(side="left", fill="both", expand=True)
+
+    tk.Label(side, text="맞춤돌봄도우미", font=F(13, True), bg=C_SIDE, fg=C_TEXT, anchor="w",
+             padx=18, pady=18).pack(fill="x")
+    nav = {}
+    pages = {}
+    cur = {"page": None}
+
+    def nav_item(parent, key, text):
+        lab = tk.Label(parent, text=text, font=F(10), bg=C_SIDE, fg=C_MUTED, anchor="w",
+                       padx=14, pady=8, cursor="hand2")
+        lab.pack(fill="x", padx=8, pady=1)
+        lab.bind("<Button-1>", lambda e: show_page(key))
+        lab.bind("<Enter>", lambda e: cur["page"] != key and lab.configure(bg=C_SIDE_HOVER))
+        lab.bind("<Leave>", lambda e: cur["page"] != key and lab.configure(bg=C_SIDE))
+        nav[key] = lab
+
+    nav_item(side, "daily", "일일실적 점검")
+    nav_item(side, "kakao", "카톡 요청 처리")
+    side_bottom = tk.Frame(side, bg=C_SIDE)
+    side_bottom.pack(side="bottom", fill="x", pady=(0, 14))
+    tk.Frame(side_bottom, bg=C_LINE, height=1).pack(fill="x", pady=(0, 8))
+    nav_item(side_bottom, "settings", "설정")
+    pill = tk.Label(side_bottom, font=F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=170)
+    pill.pack(anchor="w", padx=22, pady=(8, 4))
+    head_right = tk.Frame(side_bottom, bg=C_SIDE)  # 업데이트 버튼 자리
+    head_right.pack(anchor="w", padx=22)
+    tk.Label(side_bottom, text=f"v{APP_VERSION}", font=F(8), bg=C_SIDE, fg=C_MUTED).pack(anchor="w", padx=22)
+
+    def show_page(key):
+        if key not in pages:
+            pages[key] = PAGE_BUILDERS[key]()
+        for k, lab in nav.items():
+            on = k == key
+            lab.configure(bg=C_SIDE_ON if on else C_SIDE, fg=C_TEXT if on else C_MUTED,
+                          font=F(10, on))
+        for k, p in pages.items():
+            if k != key:
+                p.pack_forget()
+        pages[key].pack(fill="both", expand=True, padx=26, pady=(20, 12))
+        cur["page"] = key
+
+    # ================= 일일실적 점검 =================
+    outer = tk.Frame(content, bg=C_BG)
+    pages["daily"] = outer
 
     # ---- 머리글
     head = tk.Frame(outer, bg=C_BG)
@@ -837,23 +884,9 @@ def main_gui():
     wd = "월화수목금토일"[date.today().weekday()]
     tk.Label(titles, text=f"{date.today():%Y-%m-%d} {wd}요일 · 오늘 실적 기준",
              font=F(10), bg=C_BG, fg=C_MUTED).pack(anchor="w")
-    head_right = tk.Frame(head, bg=C_BG)
-    head_right.pack(side="right")
-
-    # ---- 상태 + 버튼
-    bar = tk.Frame(outer, bg=C_BG)
-    bar.pack(fill="x", pady=(14, 10))
-    pill = tk.Label(bar, font=F(9), padx=10, pady=3)
-    pill.pack(side="left")
-    btn_check = RoundButton(bar, "점검 시작", lambda: do_check(), kind="primary")
-    btn_check.pack(side="right")
-    btn_chrome = RoundButton(bar, "크롬 창 열기", lambda: do_open(), kind="secondary")
-    btn_chrome.pack(side="right", padx=(0, 8))
-    btn_login = RoundButton(bar, "로그인 정보", lambda: do_login_settings(), kind="secondary")
-    btn_login.pack(side="right", padx=(0, 8))
-    btn_kakao = RoundButton(bar, "카톡 요청", lambda: open_kakao_window(root, RoundButton, F, busy),
-                            kind="secondary")
-    btn_kakao.pack(side="right", padx=(0, 8))
+    btn_check = RoundButton(head, "점검 시작", lambda: do_check(), kind="primary")
+    btn_check.pack(side="right", anchor="n")
+    tk.Frame(outer, bg=C_BG, height=14).pack(fill="x")
 
     # ---- 진행 표시
     prog_text = tk.Label(outer, text="준비됐어요. 점검 시작을 눌러 주세요.", font=F(9), bg=C_BG,
@@ -903,15 +936,84 @@ def main_gui():
     win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
     inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
     canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
-    canvas.bind_all("<MouseWheel>", lambda e: canvas.yview_scroll(int(-e.delta / 120), "units"))
+    canvas.bind_all("<MouseWheel>", lambda e: cur["page"] == "daily"
+                    and canvas.yview_scroll(int(-e.delta / 120), "units"))
 
     empty = tk.Label(inner, text="점검을 시작하면 여기에 결과가 나와요.", font=F(10), bg=C_BG, fg=C_MUTED, pady=40)
     empty.pack(fill="x")
 
-    # ---- 아래쪽
-    foot = tk.Frame(outer, bg=C_BG)
-    foot.pack(fill="x", pady=(8, 0))
-    tk.Label(foot, text=f"v{APP_VERSION}", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="right")
+    # ================= 설정 =================
+    def build_settings():
+        page = tk.Frame(content, bg=C_BG)
+        tk.Label(page, text="설정", font=F(17, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
+        tk.Label(page, text="이 PC의 윈도우 계정에만 암호화해서 저장돼요.", font=F(10), bg=C_BG,
+                 fg=C_MUTED).pack(anchor="w", pady=(0, 16))
+        form = tk.Frame(page, bg=C_BG)
+        form.pack(anchor="w", fill="x")
+        saved = load_credentials() or ("", "")
+        fields = {}
+        for key, label, value, show in (
+                ("id", "goodeos 아이디", saved[0], ""),
+                ("pw", "goodeos 비밀번호", saved[1], "●"),
+                ("jev", "Jev API 키 (카톡 요청 처리용)",
+                 "" if os.environ.get("TYPESAFE_API_KEY") else load_jev_key(), "●")):
+            tk.Label(form, text=label, font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w")
+            e = tk.Entry(form, font=F(11), width=36, show=show, relief="solid", bd=1)
+            e.insert(0, value)
+            e.pack(anchor="w", pady=(2, 12), ipady=3)
+            fields[key] = e
+        if os.environ.get("TYPESAFE_API_KEY"):
+            tk.Label(form, text="Jev API 키는 이 PC 환경변수(TYPESAFE_API_KEY)에 있는 걸 쓰고 있어요.",
+                     font=F(8), bg=C_BG, fg=C_MUTED).pack(anchor="w", pady=(0, 10))
+        hide_var = tk.BooleanVar(value=load_settings()["hide_chrome"])
+        tk.Checkbutton(form, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=hide_var,
+                       font=F(9), bg=C_BG, fg=C_TEXT, activebackground=C_BG,
+                       selectcolor=C_BG, anchor="w").pack(anchor="w")
+        btns = tk.Frame(page, bg=C_BG)
+        btns.pack(anchor="w", pady=(16, 0))
+        msg = tk.Label(page, text="", font=F(9), bg=C_BG, fg=C_MUTED, anchor="w")
+        msg.pack(anchor="w", pady=(10, 0))
+        settings_msg["label"] = msg
+
+        def save():
+            uid, pwd = fields["id"].get().strip(), fields["pw"].get()
+            if not uid or not pwd:
+                msg.configure(text="아이디와 비밀번호를 모두 입력해 주세요.", fg=C_DANGER)
+                return
+            try:
+                save_credentials(uid, pwd)
+                save_settings(hide_chrome=bool(hide_var.get()))
+                if fields["jev"].get().strip() or not os.environ.get("TYPESAFE_API_KEY"):
+                    save_jev_key(fields["jev"].get().strip())
+            except Exception as e:
+                msg.configure(text=f"저장하지 못했어요: {e}", fg=C_DANGER)
+                return
+            msg.configure(text="저장했어요. 이제 점검 시작만 누르면 자동으로 로그인해요.", fg=C_MUTED)
+
+        def remove():
+            delete_credentials()
+            fields["id"].delete(0, "end")
+            fields["pw"].delete(0, "end")
+            msg.configure(text="저장된 로그인 정보를 지웠어요.", fg=C_MUTED)
+
+        RoundButton(btns, "저장", save, kind="primary", height=34, padx=18, size=9).pack(side="left")
+        RoundButton(btns, "크롬 창 열기", lambda: do_open(), height=34, padx=16, size=9).pack(
+            side="left", padx=(8, 0))
+        RoundButton(btns, "로그인 정보 지우기", remove, height=34, padx=16, size=9).pack(side="left", padx=(8, 0))
+        return page
+
+    settings_msg = {"label": None}
+
+    def settings_note(text, error=False):
+        lab = settings_msg["label"]
+        if lab is not None:
+            lab.configure(text=text, fg=C_DANGER if error else C_MUTED)
+
+    def build_kakao():
+        import kakao_ui
+        return kakao_ui.build_page(content, RoundButton, F, busy, sys.modules[__name__])
+
+    PAGE_BUILDERS = {"settings": build_settings, "kakao": build_kakao}
 
     # ================= 동작 =================
     def ui(fn):
@@ -980,17 +1082,17 @@ def main_gui():
                 return
             busy["v"] = True
             btn_check.set_enabled(False)
-            set_progress(0, "크롬 창을 열고 자동으로 로그인하는 중...")
+            settings_note("크롬 창을 열고 자동으로 로그인하는 중...")
 
             def work():
                 from playwright.sync_api import sync_playwright
                 try:
                     with sync_playwright() as pw:
                         get_page(pw, show=True)
-                    ui(lambda: set_progress(0, "크롬 창을 열고 로그인했어요."))
+                    ui(lambda: settings_note("크롬 창을 열고 로그인했어요."))
                 except Exception as e:
                     msg = str(e)
-                    ui(lambda: set_progress(0, msg, True))
+                    ui(lambda: settings_note(msg, True))
                 finally:
                     busy["v"] = False
                     ui(lambda: btn_check.set_enabled(True))
@@ -1002,71 +1104,11 @@ def main_gui():
                 close_chrome()
             opened = open_chrome()
         except Exception as e:
-            set_progress(0, str(e), True)
+            settings_note(str(e), True)
             return
-        set_progress(0, "자동화용 크롬을 열었어요. 로그인한 뒤 점검 시작을 눌러 주세요." if opened
+        settings_note("자동화용 크롬을 열었어요. 로그인한 뒤 점검 시작을 눌러 주세요." if opened
                      else "자동화용 크롬이 이미 열려 있어요.")
         refresh_status()
-
-    def do_login_settings():
-        win = tk.Toplevel(root)
-        win.title("로그인 정보")
-        win.configure(bg=C_BG)
-        win.resizable(False, False)
-        win.transient(root)
-        win.grab_set()
-        body = tk.Frame(win, bg=C_BG, padx=22, pady=18)
-        body.pack(fill="both", expand=True)
-        tk.Label(body, text="goodeos 자동 로그인", font=F(12, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
-        tk.Label(body, text="이 PC의 윈도우 계정에만 암호화해서 저장돼요.", font=F(9), bg=C_BG,
-                 fg=C_MUTED).pack(anchor="w", pady=(2, 12))
-        saved = load_credentials() or ("", "")
-        entries = []
-        for label, value, show in (("아이디", saved[0], ""), ("비밀번호", saved[1], "●")):
-            tk.Label(body, text=label, font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w")
-            e = tk.Entry(body, font=F(11), width=28, show=show, relief="solid", bd=1)
-            e.insert(0, value)
-            e.pack(fill="x", pady=(2, 10), ipady=3)
-            entries.append(e)
-        tk.Label(body, text="Jev API 키 (카톡 요청 처리용)", font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w")
-        jev_entry = tk.Entry(body, font=F(11), width=28, show="●", relief="solid", bd=1)
-        jev_entry.insert(0, "" if os.environ.get("TYPESAFE_API_KEY") else load_jev_key())
-        jev_entry.pack(fill="x", pady=(2, 10), ipady=3)
-        hide_var = tk.BooleanVar(value=load_settings()["hide_chrome"])
-        tk.Checkbutton(body, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=hide_var,
-                       font=F(9), bg=C_BG, fg=C_TEXT, activebackground=C_BG,
-                       selectcolor=C_BG, anchor="w").pack(fill="x")
-        btns = tk.Frame(body, bg=C_BG)
-        btns.pack(fill="x", pady=(10, 0))
-
-        def save():
-            uid, pwd = entries[0].get().strip(), entries[1].get()
-            if not uid or not pwd:
-                messagebox.showwarning("로그인 정보", "아이디와 비밀번호를 모두 입력해 주세요.", parent=win)
-                return
-            try:
-                save_credentials(uid, pwd)
-                save_settings(hide_chrome=bool(hide_var.get()))
-                if jev_entry.get().strip() or not os.environ.get("TYPESAFE_API_KEY"):
-                    save_jev_key(jev_entry.get().strip())
-            except Exception as e:
-                messagebox.showerror("로그인 정보", f"저장하지 못했어요: {e}", parent=win)
-                return
-            win.destroy()
-            set_progress(0, "로그인 정보를 저장했어요. 이제 점검 시작만 누르면 자동으로 로그인해요.")
-
-        def remove():
-            delete_credentials()
-            win.destroy()
-            set_progress(0, "저장된 로그인 정보를 지웠어요.")
-
-        RoundButton(btns, "저장", save, kind="primary", height=32, padx=16, size=9).pack(side="right")
-        RoundButton(btns, "취소", win.destroy, height=32, padx=16, size=9).pack(side="right", padx=(0, 6))
-        if saved[0]:
-            RoundButton(btns, "삭제", remove, height=32, padx=16, size=9).pack(side="left")
-        entries[1 if saved[0] else 0].focus_set()
-        win.bind("<Return>", lambda e: save())
-        win.bind("<Escape>", lambda e: win.destroy())
 
     def do_check():
         if busy["v"]:
@@ -1192,6 +1234,7 @@ def main_gui():
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
+    show_page("daily")
     set_status("check")
     threading.Thread(target=check_update, daemon=True).start()
     root.after(300, poll_status)
