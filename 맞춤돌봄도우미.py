@@ -210,6 +210,30 @@ def delete_credentials():
         os.remove(CRED_PATH)
 
 
+JEV_KEY_PATH = os.path.join(APP_DATA_DIR, "jev.dat")
+
+
+def save_jev_key(key):
+    os.makedirs(APP_DATA_DIR, exist_ok=True)
+    if not key:
+        if os.path.exists(JEV_KEY_PATH):
+            os.remove(JEV_KEY_PATH)
+        return
+    with open(JEV_KEY_PATH, "wb") as f:
+        f.write(_dpapi(key.encode("utf-8"), True))
+
+
+def load_jev_key():
+    """Jev(TypeSafe) API 키. 환경변수 TYPESAFE_API_KEY 가 있으면 그걸 우선."""
+    if os.environ.get("TYPESAFE_API_KEY"):
+        return os.environ["TYPESAFE_API_KEY"]
+    try:
+        with open(JEV_KEY_PATH, "rb") as f:
+            return _dpapi(f.read(), False).decode("utf-8")
+    except Exception:
+        return ""
+
+
 def _logged_in(page):
     for fr in page.frames:
         try:
@@ -766,6 +790,11 @@ def _make_round_button_class(tk, tkfont):
     return RoundButton
 
 
+def open_kakao_window(root, RoundButton, F, busy):
+    import kakao_ui
+    kakao_ui.open_window(root, RoundButton, F, busy, sys.modules[__name__])
+
+
 def main_gui():
     import tkinter as tk
     from tkinter import font as tkfont, messagebox, ttk
@@ -822,6 +851,9 @@ def main_gui():
     btn_chrome.pack(side="right", padx=(0, 8))
     btn_login = RoundButton(bar, "로그인 정보", lambda: do_login_settings(), kind="secondary")
     btn_login.pack(side="right", padx=(0, 8))
+    btn_kakao = RoundButton(bar, "카톡 요청", lambda: open_kakao_window(root, RoundButton, F, busy),
+                            kind="secondary")
+    btn_kakao.pack(side="right", padx=(0, 8))
 
     # ---- 진행 표시
     prog_text = tk.Label(outer, text="준비됐어요. 점검 시작을 눌러 주세요.", font=F(9), bg=C_BG,
@@ -996,6 +1028,10 @@ def main_gui():
             e.insert(0, value)
             e.pack(fill="x", pady=(2, 10), ipady=3)
             entries.append(e)
+        tk.Label(body, text="Jev API 키 (카톡 요청 처리용)", font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w")
+        jev_entry = tk.Entry(body, font=F(11), width=28, show="●", relief="solid", bd=1)
+        jev_entry.insert(0, "" if os.environ.get("TYPESAFE_API_KEY") else load_jev_key())
+        jev_entry.pack(fill="x", pady=(2, 10), ipady=3)
         hide_var = tk.BooleanVar(value=load_settings()["hide_chrome"])
         tk.Checkbutton(body, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=hide_var,
                        font=F(9), bg=C_BG, fg=C_TEXT, activebackground=C_BG,
@@ -1011,6 +1047,8 @@ def main_gui():
             try:
                 save_credentials(uid, pwd)
                 save_settings(hide_chrome=bool(hide_var.get()))
+                if jev_entry.get().strip() or not os.environ.get("TYPESAFE_API_KEY"):
+                    save_jev_key(jev_entry.get().strip())
             except Exception as e:
                 messagebox.showerror("로그인 정보", f"저장하지 못했어요: {e}", parent=win)
                 return
