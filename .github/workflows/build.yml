@@ -1,0 +1,28 @@
+name: Windows 빌드
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["claude/**"]
+    paths: ["맞춤돌봄도우미.py", "icon.ico", ".github/workflows/build.yml"]
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: 패키지 설치
+        run: pip install pyinstaller playwright
+      - name: exe 빌드
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path "맞춤돌봄도우미.py" -Pattern '^APP_VERSION = "(.+)"').Matches[0].Groups[1].Value
+          echo "VER=$ver" >> $env:GITHUB_ENV
+          pyinstaller --onefile --windowed --noconfirm --icon icon.ico --add-data "icon.ico;." --name "CareHelper-$ver" "맞춤돌봄도우미.py"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CareHelper-${{ env.VER }}
+          path: dist/CareHelper-${{ env.VER }}.exe
