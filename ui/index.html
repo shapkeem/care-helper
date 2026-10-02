@@ -20,6 +20,9 @@
 }
 *{box-sizing:border-box}
 html,body{margin:0;height:100%;background:var(--page);color:var(--text-primary);font:14px/1.5 var(--font)}
+/* 글자를 드래그로 잡히지 않게. 입력칸과 기록 칸(복사할 수 있게)만 예외 */
+body{user-select:none;-webkit-user-select:none;cursor:default}
+input,textarea,.logs{user-select:text;-webkit-user-select:text}
 button{white-space:nowrap;flex:none;font:inherit;font-size:13px;height:34px;padding:0 14px;border-radius:var(--radius);border:1px solid var(--border-strong);
   background:var(--surface-2);color:var(--text-primary);cursor:pointer}
 button:hover{background:var(--surface-1)}

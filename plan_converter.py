@@ -1293,7 +1293,9 @@ def merge_converted_files(target_folder: Path, log=None):
         and not f.stem.startswith(ERROR_FILE_PREFIX)
         and not f.name.startswith("~$")
     ]
-    if not files:
+    if len(files) < 2:  # 파일이 하나뿐이면 통합본을 만들지 않음
+        if files:
+            _log("변환된 파일이 하나뿐이라 통합본은 만들지 않았습니다.")
         return None
     files.sort(key=_natural_sort_key)
 
