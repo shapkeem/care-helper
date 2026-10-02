@@ -56,6 +56,63 @@ def load_roster(app, page, today, log):
     return rows
 
 
+def roster_path_for(day):
+    """그날 받은 대상자리스트 파일 경로 (없으면 None)."""
+    p = os.path.join(ROSTER_DIR, f"대상자리스트{day:%Y.%m.%d}.xls")
+    return p if os.path.exists(p) else None
+
+
+def _workers_path(day):
+    return os.path.join(ROSTER_DIR, f"생활지원사명단{day:%Y.%m.%d}.json")
+
+
+def load_workers(app, page, today, log):
+    """생활지원사 명단(이름·생년월일·동)도 하루 한 번 goodeos 에서 받아 대상자리스트 옆에 둔다."""
+    import json
+    path = _workers_path(today)
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    os.makedirs(ROSTER_DIR, exist_ok=True)
+    for f in os.listdir(ROSTER_DIR):  # 지난 명단 지우기
+        if f.startswith("생활지원사명단") and f.endswith(".json"):
+            try:
+                os.remove(os.path.join(ROSTER_DIR, f))
+            except OSError:
+                pass
+    log("오늘 생활지원사 명단 받는 중...")
+    workers = g.fetch_workers(page, today.year, today.month)
+    if not workers:
+        raise g.WorkError("생활지원사 명단을 받지 못했어요.")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(workers, f, ensure_ascii=False)
+    log(f"생활지원사 명단 {len(workers)}명")
+    return workers
+
+
+def workers_for(day):
+    import json
+    try:
+        with open(_workers_path(day), encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return None
+
+
+def fetch_daily_lists(app, log):
+    """[오늘 명단 받기]: goodeos 에 로그인해서 오늘 대상자리스트와 생활지원사 명단을 받는다. → 서버 날짜"""
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as pw:
+            page = app.get_page(pw)
+            today = (datetime.now() + g.server_offset(page)).date()
+            load_roster(app, page, today, log)
+            load_workers(app, page, today, log)
+            return today
+    finally:
+        app.schedule_chrome_close()
+
+
 class KakaoJob:
     def __init__(self, app, busy, status, row, log, question):
         jev.KEY_LOADER = app.load_jev_key

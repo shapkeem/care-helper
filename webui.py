@@ -238,6 +238,126 @@ class Api:
     def kakao_stop(self):
         self._job.stop()
 
+    # ---- 제공계획서 변환
+    def conv_info(self):
+        import kakao_job
+        import plan_converter as pc
+        src, dst = pc.work_folders()  # 바탕화면에 '작업전/작업후' 폴더가 없으면 만든다
+        try:
+            n_src = len(pc.find_source_excels(src))
+        except FileNotFoundError:
+            n_src = 0
+        today = date.today()
+        roster = kakao_job.roster_path_for(today)
+        leftovers = [f for f in dst.glob("*.xlsx") if not f.name.startswith("~$")]
+        return {"src": str(src), "dst": str(dst), "srcCount": n_src,
+                "roster": os.path.basename(roster) if roster else "",
+                "workers": len(kakao_job.workers_for(today) or {}), "leftovers": len(leftovers)}
+
+    def conv_fetch(self):
+        """[오늘 명단 받기]"""
+        if self._busy["v"]:
+            return "다른 작업이 진행 중이에요."
+        self._busy["v"] = True
+
+        def work():
+            import kakao_job
+            try:
+                kakao_job.fetch_daily_lists(self._app, lambda m: self._emit("conv_log", m))
+                self._emit("conv_fetched", {"ok": True, "msg": "오늘 명단을 받았어요."})
+            except Exception as e:
+                self._emit("conv_fetched", {"ok": False, "msg": str(e)})
+            finally:
+                self._busy["v"] = False
+        self._thread(work)
+        return None
+
+    def conv_start(self):
+        import kakao_job
+        if self._busy["v"]:
+            return "다른 작업이 진행 중이에요."
+        today = date.today()
+        roster = kakao_job.roster_path_for(today)
+        if not roster:
+            return "오늘 대상자리스트가 아직 없어서 변환하지 않았어요. [오늘 명단 받기]를 먼저 눌러 주세요."
+        self._busy["v"] = True
+        self._conv_del = ([], [])
+
+        def work():
+            import plan_converter as pc
+            log = lambda m: self._emit("conv_log", m)
+            try:
+                _dst, total, ok, failed, del_src, del_out = pc.run_conversion(
+                    log, roster, kakao_job.workers_for(today),
+                    on_progress=lambda d, t: self._emit("conv_progress", {"done": d, "total": t}),
+                    review_callback=self._conv_review)
+                self._conv_del = (del_src, del_out)
+                log("")
+                log(f"총 {total}개 중 {ok}개 성공, {len(failed)}개 실패.")
+                for name, reason in failed:
+                    log(f"  - {name} ({reason})")
+                self._emit("conv_done", {"total": total, "ok": ok, "failed": len(failed),
+                                         "deletable": len(del_src) + len(del_out)})
+            except Exception as e:
+                log(f"[오류] {e}")
+                self._emit("conv_done", {"error": str(e)})
+            finally:
+                self._busy["v"] = False
+        self._thread(work)
+        return None
+
+    def _conv_review(self, proposals):
+        """수정 제안을 화면에 띄우고 결과({pid: 값})를 기다린다."""
+        self._props = {p.pid: p for p in proposals}
+        self._review_ev = threading.Event()
+        self._review_result = {}
+        self._emit("conv_review", [{"pid": p.pid, "kind": p.kind, "file": p.file_label, "row": p.row_label,
+                                    "person": p.person, "current": p.current_disp,
+                                    "suggested": p.suggested_disp, "reason": p.reason} for p in proposals])
+        self._review_ev.wait()
+        return self._review_result
+
+    def conv_check_value(self, pid, text):
+        """수정값을 직접 고쳤을 때 형식 확인. 문제 없으면 None, 있으면 이유."""
+        try:
+            self._props[int(pid)].build_values(text)
+            return None
+        except (ValueError, KeyError) as e:
+            return str(e) or "입력값을 확인해 주세요."
+
+    def conv_review_done(self, result):
+        self._review_result = {int(k): v for k, v in (result or {}).items()}
+        self._review_ev.set()
+
+    def conv_open(self, which):
+        import plan_converter as pc
+        src, dst = pc.work_folders()
+        os.startfile(str(src if which == "src" else dst))
+
+    def conv_delete(self):
+        """변환 후 원본·결과를 휴지통으로 (오류 있던 파일과 대상자리스트는 남김)."""
+        import gc
+        import plan_converter as pc
+        src, out = getattr(self, "_conv_del", ([], []))
+        files = [f for f in list(src) + list(out) if f.exists()]
+        if not files:
+            return "지울 파일이 없어요."
+        gc.collect()
+        if not pc.send_to_recycle_bin(files):
+            files = [f for f in files if f.exists() and not pc.send_to_recycle_bin([f])]
+            if files:
+                return f"{len(files)}개 파일을 휴지통으로 보내지 못했어요. 엑셀에서 열려 있으면 닫고 다시 눌러 주세요."
+        self._conv_del = ([], [])
+        return "원본과 변환 결과를 휴지통으로 보냈어요. (휴지통에서 되돌릴 수 있어요)"
+
+    def conv_clear_leftovers(self):
+        import plan_converter as pc
+        _src, dst = pc.work_folders()
+        files = [f for f in dst.glob("*.xlsx") if not f.name.startswith("~$")]
+        if files and pc.send_to_recycle_bin(files):
+            return f"이전 변환 파일 {len(files)}개를 휴지통으로 보냈어요."
+        return "이전 파일을 휴지통으로 보내지 못했어요. 열려 있는지 확인해 주세요." if files else "지울 파일이 없어요."
+
     # ---- 설정
     def save_settings(self, user_id, password, jev_key, hide):
         a = self._app

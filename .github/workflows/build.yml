@@ -9,7 +9,7 @@ on:
         default: false
   push:
     branches: ["claude/**"]
-    paths: ["맞춤돌봄도우미.py", "icon.ico", ".github/workflows/build.yml"]
+    paths: ["*.py", "ui/**", "icon.ico", ".github/workflows/build.yml"]
 
 permissions:
   contents: write
@@ -23,13 +23,15 @@ jobs:
         with:
           python-version: "3.12"
       - name: 패키지 설치
-        run: pip install pyinstaller playwright
+        run: pip install pyinstaller playwright pywebview openpyxl xlrd
       - name: exe 빌드
         shell: pwsh
         run: |
           $ver = (Select-String -Path "맞춤돌봄도우미.py" -Pattern '^APP_VERSION = "(.+)"').Matches[0].Groups[1].Value
           echo "VER=$ver" >> $env:GITHUB_ENV
-          pyinstaller --onefile --windowed --noconfirm --icon icon.ico --add-data "icon.ico;." --name "CareHelper-$ver" "맞춤돌봄도우미.py"
+          pyinstaller --onefile --windowed --noconfirm --icon icon.ico --add-data "icon.ico;." --add-data "ui;ui" `
+            --collect-all webview --hidden-import webui --hidden-import kakao_ui --hidden-import plan_converter `
+            --name "CareHelper-$ver" "맞춤돌봄도우미.py"
       - uses: actions/upload-artifact@v4
         with:
           name: CareHelper-${{ env.VER }}

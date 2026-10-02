@@ -5,6 +5,7 @@
 - 일정은 대상자+날짜+시간으로 찾고, 실적은 같은 seq(대상자·월별 일정 번호)로 일정과 짝을 맞춘다.
 - 대상이 하나로 정해지지 않거나 저장 확인 문구가 안 뜨면 WorkError 로 멈춘다(사람에게 질문).
 """
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -284,6 +285,33 @@ def open_result(page, person, ic_name, year, month):
     page.wait_for_selector("#DIV_LAYER #TBL_SVC", timeout=20000)
     _settle(page)
     page.evaluate("(k) => { window.__ch_rst = k; window.__ch_plan = null; }", key)
+
+
+def fetch_workers(page, year, month):
+    """실적등록 화면의 전담사회복지사별 생활지원사 목록(읽기 전용)으로 생활지원사 명단을 만든다.
+    → {이름: {"birth": YYYYMMDD, "dong": "1동"}}"""
+    page.goto(RST_URL)
+    page.wait_for_load_state()
+    _settle(page)
+    raw = page.evaluate("""async (ym) => {
+        const out = {};
+        for (const o of [...document.querySelectorAll('#sw_cd option')]) {
+            const r = await $.ajax({type: 'POST', url: './emp_list.php',
+                                    data: {yymm: ym, sw_cd: o.value, tgt_name: '', gbn: '3'}});
+            const list = (typeof r === 'string' ? JSON.parse(r) : r) || [];
+            const dong = (o.text.match(/\\((\\d+동)\\)/) || [])[1] || '';
+            for (const e of list) out[e.name] = {birthday: e.birthday || '', dong: dong};
+        }
+        return out;
+    }""", f"{year}{month:02d}")
+    yy_now = datetime.now().year % 100
+    workers = {}
+    for name, v in raw.items():
+        d = re.sub(r"\D", "", v.get("birthday", ""))  # '65.05.06' → 650506
+        if len(d) == 6:
+            century = 1900 if int(d[:2]) > yy_now else 2000
+            workers[name.strip()] = {"birth": (century + int(d[:2])) * 10000 + int(d[2:]), "dong": v.get("dong", "")}
+    return workers
 
 
 def _result_row(page, seq, d):
