@@ -389,6 +389,15 @@ def schedule_chrome_close():
     _idle["timer"] = t
 
 
+BACKUP_MSG = "goodeos 정기 백업 시간(밤 12시~새벽 4시)이라 지금은 쓸 수 없어요. 4시 이후에 다시 해 주세요."
+
+
+def check_backup_time(page):
+    """백업 시간에는 goodeos 가 모든 화면을 daily_backup.php 로 보낸다."""
+    if "daily_backup" in (page.url or ""):
+        raise NeedLogin(BACKUP_MSG)
+
+
 def get_page(pw, show=False):
     """show=True 면 크롬 창을 보이게 띄운다. 아니면 로그인 정보가 있고 '창 숨기기'가 켜져 있을 때
     창 없이 백그라운드로 띄운다."""
@@ -408,6 +417,7 @@ def get_page(pw, show=False):
     page.on("dialog", lambda d: d.accept())
     page.goto(SITE + "/main/main.php")
     page.wait_for_load_state()
+    check_backup_time(page)
     if "로그아웃" not in page.inner_text("body"):
         if not creds:
             raise NeedLogin("goodeos에 로그인되어 있지 않습니다. 자동화용 크롬 창에서 로그인하거나 "
@@ -610,6 +620,8 @@ def check_status():
             for page in ctx.pages:
                 if "goodeos.co.kr" not in page.url:
                     continue
+                if "daily_backup" in page.url:
+                    return "backup"
                 for fr in page.frames:
                     try:
                         if "로그아웃" in fr.evaluate("document.body ? document.body.innerText : ''"):
@@ -850,6 +862,7 @@ STATUS_STYLE = {  # 상태: (배경, 글자, 문구)
     "ok": ("#DCFCE7", "#166534", "goodeos 로그인됨"),
     "ok_hidden": ("#DCFCE7", "#166534", "goodeos 로그인됨 · 크롬 백그라운드"),
     "login": ("#FEF3C7", "#92400E", "goodeos 로그인이 필요해요"),
+    "backup": ("#FEF3C7", "#92400E", "goodeos 백업 시간 (0~4시)"),
     "off": ("#F1F5F9", "#475569", "자동화 크롬이 꺼져 있어요"),
     "check": ("#F1F5F9", "#475569", "상태 확인 중..."),
 }

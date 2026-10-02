@@ -450,8 +450,8 @@ window.App = { on(ev, d){
 
 async function refreshStatus(){
   const s = await api.status(); if(!s) return;
-  $("pill").className = "pill " + (s.kind.startsWith("ok") ? "ok" : s.kind==="login" ? "login" : "");
-  $("pillText").textContent = ({ok:"로그인됨", ok_hidden:"로그인됨 · 백그라운드", login:"로그인 필요", off:"크롬 꺼짐"})[s.kind] || s.text;
+  $("pill").className = "pill " + (s.kind.startsWith("ok") ? "ok" : (s.kind==="login"||s.kind==="backup") ? "login" : "");
+  $("pillText").textContent = ({ok:"로그인됨", ok_hidden:"로그인됨 · 백그라운드", login:"로그인 필요", off:"크롬 꺼짐", backup:"백업 시간 (0~4시)"})[s.kind] || s.text;
 }
 
 window.addEventListener("pywebviewready", async () => {
