@@ -24,7 +24,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "1.2.1"
+APP_VERSION = "1.2.2"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -112,28 +112,36 @@ def open_chrome(hidden=False):
     return True
 
 
-def close_chrome():
-    """자동화용 크롬 종료."""
+def close_chrome(pw=None):
+    """자동화용 크롬 종료. 이미 열린 playwright(pw) 안에서 부를 때는 그걸 넘겨야 한다
+    (sync_playwright 는 겹쳐서 열 수 없음)."""
     if not chrome_debug_alive():
         return
-    from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        browser = pw.chromium.connect_over_cdp(CDP_URL)
+
+    def _close(p):
+        browser = p.chromium.connect_over_cdp(CDP_URL)
         try:
             browser.new_browser_cdp_session().send("Browser.close")
         except Exception:
             pass
+
+    if pw is not None:
+        _close(pw)
+    else:
+        from playwright.sync_api import sync_playwright
+        with sync_playwright() as p:
+            _close(p)
     for _ in range(20):
         if not chrome_debug_alive():
             return
         time.sleep(0.25)
 
 
-def ensure_chrome(hidden=False, timeout=20):
+def ensure_chrome(hidden=False, timeout=20, pw=None):
     """자동화용 크롬이 꺼져 있으면 켜고, 연결될 때까지 기다린다.
     창을 보여 달라는데(hidden=False) 백그라운드로 떠 있으면 껐다가 창으로 다시 켠다."""
     if not hidden and chrome_mode() == "hidden":
-        close_chrome()
+        close_chrome(pw)
     if chrome_debug_alive():
         return
     open_chrome(hidden)
@@ -253,11 +261,11 @@ def get_page(pw, show=False):
     창 없이 백그라운드로 띄운다."""
     creds = load_credentials()
     if show:
-        ensure_chrome(hidden=False)
+        ensure_chrome(hidden=False, pw=pw)
     elif not chrome_debug_alive():
         if not creds:
             raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '크롬 창 열기'를 누르고 로그인하거나, '로그인 정보'를 저장해 주세요.")
-        ensure_chrome(hidden=load_settings()["hide_chrome"])
+        ensure_chrome(hidden=load_settings()["hide_chrome"], pw=pw)
     browser = pw.chromium.connect_over_cdp(CDP_URL)
     ctx = browser.contexts[0]
     page = next((p for p in ctx.pages if "goodeos.co.kr" in p.url), None)
@@ -921,10 +929,7 @@ def main_gui():
     foot = tk.Frame(outer, bg=C_BG)
     foot.pack(fill="x", pady=(8, 0))
     tk.Label(foot, text="결과는 바탕 화면 › 업무 › 일일실적 폴더에 저장돼요", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="left")
-    ver_label = tk.Label(foot, text=f"v{APP_VERSION} · 업데이트 확인", font=F(9), bg=C_BG, fg=C_MUTED,
-                         cursor="hand2")
-    ver_label.pack(side="right")
-    ver_label.bind("<Button-1>", lambda e: threading.Thread(target=check_update, args=(True,), daemon=True).start())
+    tk.Label(foot, text=f"v{APP_VERSION}", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="right")
 
     # ================= 동작 =================
     def ui(fn):
@@ -1134,25 +1139,13 @@ def main_gui():
             upd["btn"].pack()
             blink()
 
-    def check_update(manual=False):
-        if manual:
-            ui(lambda: set_progress(prog["value"], "새 버전이 있는지 확인하는 중..."))
+    def check_update():  # 켤 때 한 번 확인
         try:
             info = fetch_latest_release()
         except Exception:
-            if manual:
-                ui(lambda: set_progress(0, "업데이트를 확인하지 못했어요. 인터넷 연결을 확인해 주세요.", True))
             return
         if info and _parse_version(info["version"]) > _parse_version(APP_VERSION):
             ui(lambda: show_update_button(info))
-            if manual:
-                ui(lambda: set_progress(prog["value"], f"새 버전 v{info['version']}이 있어요. 오른쪽 위 업데이트를 눌러 주세요."))
-        elif manual:
-            ui(lambda: set_progress(prog["value"], f"지금 최신 버전(v{APP_VERSION})이에요."))
-
-    def poll_update():  # 켜 둔 채로 있어도 새 버전을 알 수 있게 1시간마다 확인
-        root.after(1000, poll_update)
-        root.after(60 * 60 * 1000, poll_update)
 
     def do_update():
         info = upd["info"]
