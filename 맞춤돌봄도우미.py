@@ -2,10 +2,9 @@
 """일일실적 점검 프로그램 (goodeos 맞춤돌봄케어).
 
 기능
-  1. 대상자조회에서 이용/장기부재 명단을 받아 이용자리스트.xls / 장기부재리스트.xls 로 저장
-     (이용자리스트 맨 아래에 장기부재자를 열 순서 그대로 붙임)
+  1. 대상자조회에서 이용/장기부재 명단을 받아 읽음 (임시 폴더에 받고 끝나면 지움, 따로 저장하지 않음)
   2. 통계 > 서비스현황(일별) 세 서비스 명단(오늘)을 읽어 이름+생년월일로 대조
-  3. 실적미입력 이용자 / 실적이 등록된 장기부재자 결과를 텍스트로 출력
+  3. 실적미입력 이용자 / 실적이 등록된 장기부재자 결과를 화면에 보여 줌
 
 크롬은 '자동화용 크롬'(원격 디버깅 포트 9222)을 씁니다. '로그인 정보'를 저장해 두면
 크롬을 켜고 goodeos에 로그인하는 것까지 자동으로 합니다. (아이디/비밀번호는 윈도우 DPAPI로
@@ -29,9 +28,6 @@ UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
 WORK_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
-OUT_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "바탕 화면", "업무", "일일실적")
-if not os.path.isdir(os.path.join(os.path.expanduser("~"), "OneDrive", "바탕 화면")):
-    OUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "업무", "일일실적")
 APP_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME)
 PROFILE_DIR = os.path.join(APP_DATA_DIR, "chrome_profile")
 CRED_PATH = os.path.join(APP_DATA_DIR, "login.dat")
@@ -383,32 +379,6 @@ def read_list(path):
     return [dict(zip(names, [t for t, _, _ in cells])) for cells in body if len(cells) >= ncol]
 
 
-def merge_html(main_path, extra_path, dest):
-    """main 표 맨 아래에 extra 데이터행을 열 순서 그대로 붙이고 No 를 다시 매긴다."""
-    def load(p):
-        with open(p, "rb") as f:
-            return f.read().decode("utf-8", errors="replace")
-
-    def rows(t):
-        return re.findall(r"<tr\b.*?</tr>", t, flags=re.S)
-
-    main_html = load(main_path)
-    main_rows = rows(main_html)
-    extra_rows = rows(load(extra_path))
-    head_n = sum(1 for r in main_rows if "<th" in r)
-    data = [r for r in main_rows[head_n:]] + [r for r in extra_rows[head_n:] if "<th" not in r]
-
-    def renumber(i, r):
-        return re.sub(r"(<td[^>]*>)\s*\d*\s*(</td>)", lambda m: f"{m.group(1)}{i}{m.group(2)}", r, count=1)
-
-    data = [renumber(i, r) for i, r in enumerate(data, 1)]
-    start = main_html.find("<table")
-    out = main_html[:start] + '<table border="1">\n' + "\n".join(main_rows[:head_n] + data) + "\n</table>\n"
-    with open(dest, "w", encoding="utf-8", newline="") as f:
-        f.write(out)
-    return len(main_rows) - head_n, len(extra_rows) - head_n
-
-
 # ---------------------------------------------------------------- 통계 명단
 def read_service_people(page, service, log):
     """서비스 행의 세목 텍스트를 클릭해 팝업 명단을 읽는다. [(이름, 생년월일)]"""
@@ -512,43 +482,28 @@ def check_status():
 
 
 def run_daily_check(log, progress=lambda pct, msg: None):
+    import tempfile
     from playwright.sync_api import sync_playwright
-    os.makedirs(OUT_DIR, exist_ok=True)
-    for name in ("이용자리스트.xls", "장기부재리스트.xls"):  # 기존 리스트는 지우고 새로 받음
-        p = os.path.join(OUT_DIR, name)
-        if os.path.exists(p):
-            os.remove(p)
-    users_path = os.path.join(OUT_DIR, "이용자리스트.xls")
-    absent_path = os.path.join(OUT_DIR, "장기부재리스트.xls")
-    tmp_users = os.path.join(OUT_DIR, "_이용_원본.xls")
-
-    with sync_playwright() as pw:
-        progress(5, "크롬·로그인 확인 중...")
-        page = get_page(pw)
-        log("로그인 확인 완료, 공지 닫음")
-        progress(15, "이용자 명단 받는 중...")
-        log("이용자 명단 받는 중...")
-        if not download_list(page, "10", tmp_users, log):
-            raise RuntimeError("이용자 명단을 받지 못했습니다.")
-        progress(40, "장기부재 명단 받는 중...")
-        log("장기부재 명단 받는 중...")
-        has_absent = download_list(page, "01", absent_path, log)
-        progress(60, "통계(서비스현황 일별) 읽는 중...")
-        log("통계(서비스현황 일별) 읽는 중...")
-        service_people = collect_service_people(page, log)
-    progress(90, "명단 정리하고 대조하는 중...")
-
-    users_df = read_list(tmp_users)
-    absent_df = read_list(absent_path) if has_absent else []
-    if has_absent:
-        n1, n2 = merge_html(tmp_users, absent_path, users_path)
-        log(f"이용자리스트 저장: 이용자 {n1}명 + 장기부재 {n2}명 (맨 아래에 붙임)")
-    else:
-        os.replace(tmp_users, users_path)
-        log("장기부재자가 없어 이용자만 저장")
-    if os.path.exists(tmp_users):
-        os.remove(tmp_users)
-    log(f"저장 위치: {OUT_DIR}")
+    with tempfile.TemporaryDirectory(prefix="care_helper_") as tmp:  # 명단은 읽기만 하고 남기지 않음
+        users_path = os.path.join(tmp, "이용자리스트.xls")
+        absent_path = os.path.join(tmp, "장기부재리스트.xls")
+        with sync_playwright() as pw:
+            progress(5, "크롬·로그인 확인 중...")
+            page = get_page(pw)
+            log("로그인 확인 완료, 공지 닫음")
+            progress(15, "이용자 명단 받는 중...")
+            log("이용자 명단 받는 중...")
+            if not download_list(page, "10", users_path, log):
+                raise RuntimeError("이용자 명단을 받지 못했습니다.")
+            progress(40, "장기부재 명단 받는 중...")
+            log("장기부재 명단 받는 중...")
+            has_absent = download_list(page, "01", absent_path, log)
+            progress(60, "통계(서비스현황 일별) 읽는 중...")
+            log("통계(서비스현황 일별) 읽는 중...")
+            service_people = collect_service_people(page, log)
+        progress(90, "명단 대조하는 중...")
+        users_df = read_list(users_path)
+        absent_df = read_list(absent_path) if has_absent else []
 
     missing, absent_reg = compare(users_df, absent_df, service_people)
     known = {key_of(r["성명"], r["생년월일"]) for rows in (users_df, absent_df) for r in rows}
@@ -556,10 +511,8 @@ def run_daily_check(log, progress=lambda pct, msg: None):
     log(f"대조 검증: 통계 명단 중 리스트에서 못 찾은 사람 {len(stray)}명"
         + (" (이용상태가 이용/장기부재가 아닌 대상자일 수 있음)" if stray else ""))
     report = build_report(missing, absent_reg, len(users_df), len(absent_df), service_people)
-    with open(os.path.join(OUT_DIR, f"점검결과_{date.today():%Y%m%d}.txt"), "w", encoding="utf-8") as f:
-        f.write(report)
     total = sum(len(v) for v in service_people.values())
-    progress(100, f"완료 · 명단 저장, 통계 {total}건 대조")
+    progress(100, f"완료 · 통계 {total}건 대조")
     return {"report": report, "missing": missing, "absent_reg": absent_reg,
             "n_users": len(users_df), "n_absent": len(absent_df), "n_stats": total}
 
@@ -904,10 +857,8 @@ def main_gui():
     listhead.pack(fill="x", pady=(16, 4))
     list_title = tk.Label(listhead, text="실적 확인이 필요한 사람", font=F(11, True), bg=C_BG, fg=C_TEXT)
     list_title.pack(side="left")
-    RoundButton(listhead, "폴더 열기", lambda: os.startfile(OUT_DIR) if os.path.isdir(OUT_DIR) else None,
-                height=30, padx=12, size=9).pack(side="right")
     RoundButton(listhead, "전체 복사", lambda: copy_text(state["report"].strip(), "전체 결과를 복사했어요."),
-                height=30, padx=12, size=9).pack(side="right", padx=(0, 6))
+                height=30, padx=12, size=9).pack(side="right")
 
     listwrap = tk.Frame(outer, bg=C_BG, highlightbackground=C_LINE, highlightthickness=1)
     listwrap.pack(fill="both", expand=True)
@@ -928,7 +879,6 @@ def main_gui():
     # ---- 아래쪽
     foot = tk.Frame(outer, bg=C_BG)
     foot.pack(fill="x", pady=(8, 0))
-    tk.Label(foot, text="결과는 바탕 화면 › 업무 › 일일실적 폴더에 저장돼요", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="left")
     tk.Label(foot, text=f"v{APP_VERSION}", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="right")
 
     # ================= 동작 =================
