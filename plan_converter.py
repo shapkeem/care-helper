@@ -1413,15 +1413,19 @@ def _log_final_summary(jobs, log):
 
 
 def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_callback=None):
-    """roster_path: 오늘 대상자리스트 파일. worker_data: {지원사 이름: {"birth": YYYYMMDD}} (없으면 지원사 검증 생략)"""
+    """roster_path: 대상자리스트 파일 (None 이면 대상자 확인 생략).
+    worker_data: {지원사 이름: {"birth": YYYYMMDD}} (없으면 지원사 생년월일 확인 생략)"""
     source_folder, target_folder = work_folders()
-    beneficiaries = load_beneficiary_list(roster_path, log)  # 못 읽으면 변환하지 않고 멈춤
-    n = sum(len(v) for v in beneficiaries.values())
-    log(f"대상자리스트 {n}명 읽기 완료 ({Path(roster_path).name})")
+    beneficiaries = None
+    if roster_path:
+        try:
+            beneficiaries = load_beneficiary_list(roster_path, log)
+            n = sum(len(v) for v in beneficiaries.values())
+            log(f"대상자리스트 {n}명 읽기 완료 ({Path(roster_path).name})")
+        except Exception as e:
+            log(f"[경고] 대상자리스트를 읽지 못해 대상자 확인은 건너뜁니다: {e}")
     if worker_data:
         log(f"생활지원사 명단 {len(worker_data)}명 (goodeos)")
-    else:
-        log("[경고] 생활지원사 명단이 없어 지원사 생년월일 검증은 건너뜁니다.")
 
     src_files = find_source_excels(source_folder)
     total = len(src_files)

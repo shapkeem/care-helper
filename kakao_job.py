@@ -37,17 +37,12 @@ def load_roster(app, page, today, log):
     name = f"대상자리스트{today:%Y.%m.%d}.xls"
     path = os.path.join(ROSTER_DIR, name)
     if not os.path.exists(path):
-        for f in os.listdir(ROSTER_DIR):  # 지난 명단 지우기
-            if f.startswith("대상자리스트") and f.endswith(".xls") and f != name:
-                try:
-                    os.remove(os.path.join(ROSTER_DIR, f))
-                except OSError:
-                    pass
         log("오늘 대상자 명단(전체) 받는 중...")
         tmp = path + ".part"
         if not app.download_list(page, "all", tmp, log):
             raise g.WorkError("대상자 명단을 받지 못했어요.")
         os.replace(tmp, path)
+        _remove_old("대상자리스트", ".xls", name)  # 새로 받은 뒤에만 지난 명단을 지움
     else:
         log(f"오늘 받은 대상자 명단 사용 ({name})")
     rows = app.read_list(path)
@@ -74,20 +69,74 @@ def load_workers(app, page, today, log):
         with open(path, encoding="utf-8") as f:
             return json.load(f)
     os.makedirs(ROSTER_DIR, exist_ok=True)
-    for f in os.listdir(ROSTER_DIR):  # 지난 명단 지우기
-        if f.startswith("생활지원사명단") and f.endswith(".json"):
-            try:
-                os.remove(os.path.join(ROSTER_DIR, f))
-            except OSError:
-                pass
     log("오늘 생활지원사 명단 받는 중...")
     workers = g.fetch_workers(page, today.year, today.month)
     if not workers:
         raise g.WorkError("생활지원사 명단을 받지 못했어요.")
     with open(path, "w", encoding="utf-8") as f:
         json.dump(workers, f, ensure_ascii=False)
+    _remove_old("생활지원사명단", ".json", os.path.basename(path))  # 새로 받은 뒤에만 지난 명단을 지움
     log(f"생활지원사 명단 {len(workers)}명")
     return workers
+
+
+def _remove_old(prefix, ext, keep):
+    for f in os.listdir(ROSTER_DIR):
+        if f.startswith(prefix) and f.endswith(ext) and f != keep:
+            try:
+                os.remove(os.path.join(ROSTER_DIR, f))
+            except OSError:
+                pass
+
+
+def latest_file(prefix, ext):
+    """C:\\맞춤돌봄도우미 에서 가장 최근 날짜 명단. → (경로, 날짜) 또는 (None, None)"""
+    import re
+    best = (None, None)
+    try:
+        names = os.listdir(ROSTER_DIR)
+    except OSError:
+        return best
+    for f in names:
+        m = re.fullmatch(re.escape(prefix) + r"(\d{4})\.(\d{2})\.(\d{2})" + re.escape(ext), f)
+        if m:
+            d = date(int(m.group(1)), int(m.group(2)), int(m.group(3)))
+            if best[1] is None or d > best[1]:
+                best = (os.path.join(ROSTER_DIR, f), d)
+    return best
+
+
+def ensure_daily_lists(app, log):
+    """제공계획서 변환용: 오늘 명단이 있으면 그대로, 없거나 지난 것이면 goodeos 에서 새로 받는다.
+    못 받으면 가장 최근 명단을 쓰고(없으면 확인 없이) 경고를 남긴다.
+    → (대상자리스트 경로 또는 None, 생활지원사 명단 또는 None, [경고들])"""
+    import json
+    warns = []
+    roster, r_day = latest_file("대상자리스트", ".xls")
+    wfile, w_day = latest_file("생활지원사명단", ".json")
+    today = date.today()
+    if r_day != today or w_day != today:
+        try:
+            today = fetch_daily_lists(app, log)
+            roster, r_day = latest_file("대상자리스트", ".xls")
+            wfile, w_day = latest_file("생활지원사명단", ".json")
+        except Exception as e:
+            log(f"[경고] goodeos 에서 명단을 새로 받지 못했어요: {e}")
+    if roster is None:
+        warns.append("대상자리스트가 없어서 대상자 확인 없이 변환했어요.")
+    elif r_day != today:
+        warns.append(f"오늘 대상자리스트를 받지 못해서 {r_day:%m/%d}에 받은 명단으로 확인했어요.")
+    workers = None
+    if wfile:
+        with open(wfile, encoding="utf-8") as f:
+            workers = json.load(f)
+        if w_day != today:
+            warns.append(f"오늘 생활지원사 명단을 받지 못해서 {w_day:%m/%d}에 받은 명단으로 확인했어요.")
+    else:
+        warns.append("생활지원사 명단이 없어서 지원사 생년월일 확인 없이 변환했어요.")
+    for w in warns:
+        log(f"[경고] {w}")
+    return roster, workers, warns
 
 
 def workers_for(day):

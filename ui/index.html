@@ -205,10 +205,10 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
       </div>
       <div class="metrics" style="grid-template-columns:repeat(3,minmax(0,1fr))">
         <div class="mc"><div class="l">작업전 파일</div><div class="n" id="cSrc">-</div></div>
-        <div class="mc" id="cRosterBox"><div class="l">오늘 대상자리스트</div><div class="n" id="cRoster" style="font-size:15px;padding-top:6px">-</div></div>
+        <div class="mc"><div class="l">대상자리스트</div><div class="n" id="cRoster">-</div></div>
         <div class="mc"><div class="l">생활지원사 명단</div><div class="n" id="cWorkers">-</div></div>
       </div>
-      <div class="notice" id="cFetchRow" style="display:none">오늘 대상자리스트가 없어요. goodeos에서 받아야 변환할 수 있어요.<button class="small primary" id="cFetch">오늘 명단 받기</button></div>
+      <div class="notice" id="cWarnRow" style="display:none"><span id="cWarnText" style="white-space:pre-line"></span></div>
       <div class="notice" id="cLeftRow" style="display:none"><span id="cLeftText"></span><button class="small" id="cLeftDel">휴지통으로</button></div>
       <div class="prog-text" id="cProgText">변환 시작을 누르면 시작해요.</div>
       <div class="bar"><div id="cBar"></div></div>
@@ -311,10 +311,9 @@ $("qSkip").onclick = () => answer(null);
 async function convRefresh(){
   const s = await api.conv_info();
   $("cSrc").textContent = s.srcCount + "개";
-  $("cRoster").textContent = s.roster || "없음";
-  $("cRosterBox").classList.toggle("hot", !s.roster);
-  $("cWorkers").textContent = s.workers ? s.workers + "명" : "-";
-  $("cFetchRow").style.display = s.roster ? "none" : "flex";
+  // 오늘 것이 아니면 [변환 시작] 때 새로 받아요
+  $("cRoster").textContent = s.roster ? s.roster + " 것" : "없음";
+  $("cWorkers").textContent = s.workers ? s.workers + " 것" : "없음";
   $("cLeftRow").style.display = s.leftovers ? "flex" : "none";
   $("cLeftText").textContent = "'작업후' 폴더에 이전에 변환된 파일 " + s.leftovers + "개가 남아 있어요.";
 }
@@ -328,7 +327,6 @@ function clog(m){
 }
 $("cOpenSrc").onclick = () => api.conv_open("src");
 $("cOpenDst").onclick = () => api.conv_open("dst");
-$("cFetch").onclick = async () => { const e = await api.conv_fetch(); if(e){ toast(e); return; } $("cFetch").disabled=true; $("cProgText").textContent="goodeos에서 오늘 명단을 받는 중..."; };
 $("cLeftDel").onclick = async () => { if(!confirm("'작업후' 폴더의 이전 변환 파일을 휴지통으로 보낼까요?")) return; toast(await api.conv_clear_leftovers()); convRefresh(); };
 $("cDel").onclick = async () => {
   if(!confirm("이번에 변환한 원본('작업전')과 결과('작업후', 통합본 포함)를 휴지통으로 보낼까요?\n(오류가 있던 파일은 남아요. 휴지통에서 되돌릴 수 있어요)")) return;
@@ -338,7 +336,7 @@ $("cStart").onclick = async () => {
   const e = await api.conv_start();
   if(e){ $("cProgText").textContent=e; $("cProgText").classList.add("err"); return; }
   $("cProgText").classList.remove("err"); $("cProgText").textContent="시작하는 중..."; $("cBar").style.width="0";
-  $("clog").innerHTML=""; $("cDoneRow").style.display="none"; $("cStart").disabled=true;
+  $("clog").innerHTML=""; $("cDoneRow").style.display="none"; $("cWarnRow").style.display="none"; $("cStart").disabled=true;
 };
 
 // 수정 제안 검토
@@ -426,12 +424,12 @@ window.App = { on(ev, d){
       d.options.slice(0,12).forEach(o=>{ const b=document.createElement("button"); b.textContent = o.desc && o.desc!==o.key ? o.key+" · "+o.desc : o.key; b.onclick=()=>answer(o.key); $("qOpts").appendChild(b); });
       $("q").classList.add("on"); $("qInput").focus(); break;
     case "conv_log": clog(d); break;
-    case "conv_progress": if(d.total){ $("cBar").style.width=Math.round(d.done*100/d.total)+"%"; $("cProgText").textContent="처리 중... ("+d.done+"/"+d.total+")"; } break;
+    case "conv_warn":
+      $("cWarnText").textContent = "⚠ " + d.join("\n⚠ "); $("cWarnRow").style.display="flex"; convRefresh(); break;
+    case "conv_progress": if(d.msg) $("cProgText").textContent=d.msg; if(d.total){ $("cBar").style.width=Math.round(d.done*100/d.total)+"%"; $("cProgText").textContent="처리 중... ("+d.done+"/"+d.total+")"; } break;
     case "conv_review":
       RV = {props:d, on:{}, val:{}}; d.forEach(p=>RV.on[p.pid]=true); rvRender();
       $("review").classList.add("on"); $("cProgText").textContent="수정 제안 "+d.length+"건을 확인해 주세요."; break;
-    case "conv_fetched":
-      $("cFetch").disabled=false; $("cProgText").textContent=d.msg; $("cProgText").classList.toggle("err",!d.ok); convRefresh(); refreshStatus(); break;
     case "conv_done":
       $("cStart").disabled=false; $("review").classList.remove("on");
       if(d.error){ $("cProgText").textContent="오류로 멈췄어요: "+d.error; $("cProgText").classList.add("err"); }

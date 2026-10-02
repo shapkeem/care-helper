@@ -248,47 +248,35 @@ class Api:
         except FileNotFoundError:
             n_src = 0
         today = date.today()
-        roster = kakao_job.roster_path_for(today)
+        _r, r_day = kakao_job.latest_file("대상자리스트", ".xls")
+        _w, w_day = kakao_job.latest_file("생활지원사명단", ".json")
         leftovers = [f for f in dst.glob("*.xlsx") if not f.name.startswith("~$")]
+
+        def day_text(d):
+            return "" if d is None else ("오늘" if d == today else f"{d:%m.%d}")
         return {"src": str(src), "dst": str(dst), "srcCount": n_src,
-                "roster": os.path.basename(roster) if roster else "",
-                "workers": len(kakao_job.workers_for(today) or {}), "leftovers": len(leftovers)}
-
-    def conv_fetch(self):
-        """[오늘 명단 받기]"""
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요."
-        self._busy["v"] = True
-
-        def work():
-            import kakao_job
-            try:
-                kakao_job.fetch_daily_lists(self._app, lambda m: self._emit("conv_log", m))
-                self._emit("conv_fetched", {"ok": True, "msg": "오늘 명단을 받았어요."})
-            except Exception as e:
-                self._emit("conv_fetched", {"ok": False, "msg": str(e)})
-            finally:
-                self._busy["v"] = False
-        self._thread(work)
-        return None
+                "roster": day_text(r_day), "rosterToday": r_day == today,
+                "workers": day_text(w_day), "workersToday": w_day == today, "leftovers": len(leftovers)}
 
     def conv_start(self):
         import kakao_job
         if self._busy["v"]:
             return "다른 작업이 진행 중이에요."
-        today = date.today()
-        roster = kakao_job.roster_path_for(today)
-        if not roster:
-            return "오늘 대상자리스트가 아직 없어서 변환하지 않았어요. [오늘 명단 받기]를 먼저 눌러 주세요."
         self._busy["v"] = True
         self._conv_del = ([], [])
 
         def work():
             import plan_converter as pc
             log = lambda m: self._emit("conv_log", m)
+            warns = []
             try:
+                # 명단: 오늘 것이 있으면 그대로, 없으면 새로 받고, 못 받으면 최근 것(경고)
+                self._emit("conv_progress", {"done": 0, "total": 0, "msg": "명단 확인 중..."})
+                roster, workers, warns = kakao_job.ensure_daily_lists(self._app, log)
+                if warns:
+                    self._emit("conv_warn", warns)
                 _dst, total, ok, failed, del_src, del_out = pc.run_conversion(
-                    log, roster, kakao_job.workers_for(today),
+                    log, roster, workers,
                     on_progress=lambda d, t: self._emit("conv_progress", {"done": d, "total": t}),
                     review_callback=self._conv_review)
                 self._conv_del = (del_src, del_out)
@@ -297,12 +285,13 @@ class Api:
                 for name, reason in failed:
                     log(f"  - {name} ({reason})")
                 self._emit("conv_done", {"total": total, "ok": ok, "failed": len(failed),
-                                         "deletable": len(del_src) + len(del_out)})
+                                         "deletable": len(del_src) + len(del_out), "warns": warns})
             except Exception as e:
                 log(f"[오류] {e}")
                 self._emit("conv_done", {"error": str(e)})
             finally:
                 self._busy["v"] = False
+                self._app.schedule_chrome_close()
         self._thread(work)
         return None
 
