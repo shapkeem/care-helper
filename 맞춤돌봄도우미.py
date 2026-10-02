@@ -61,29 +61,108 @@ def chrome_debug_alive():
         return False
 
 
-def open_chrome():
-    """자동화용 크롬 실행 (이미 떠 있으면 아무것도 안 함)."""
+CHROME_MODE_PATH = os.path.join(APP_DATA_DIR, "chrome_mode.txt")
+
+
+def chrome_mode():
+    """None(꺼짐) / 'hidden'(창 없이 백그라운드) / 'window'(창 보임)
+    창 없는 크롬은 겉으로 구분이 안 되므로, 켤 때 남겨 둔 표시로 판단한다."""
+    if not chrome_debug_alive():
+        return None
+    try:
+        with open(CHROME_MODE_PATH, encoding="utf-8") as f:
+            return "hidden" if f.read().strip() == "hidden" else "window"
+    except OSError:
+        return "window"
+
+
+def _normal_user_agent(exe):
+    """창 없는 크롬은 'HeadlessChrome' 이 붙은 UA를 쓰므로, 설치된 버전으로 보통 크롬 UA를 만든다."""
+    try:
+        vers = [d for d in os.listdir(os.path.dirname(exe)) if re.fullmatch(r"\d+(\.\d+){3}", d)]
+    except OSError:
+        vers = []
+    if not vers:
+        return None
+    ver = max(vers, key=lambda v: tuple(int(x) for x in v.split(".")))
+    return (f"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+            f"(KHTML, like Gecko) Chrome/{ver} Safari/537.36")
+
+
+def open_chrome(hidden=False):
+    """자동화용 크롬 실행 (이미 떠 있으면 아무것도 안 함). hidden=True 면 창 없이 백그라운드로."""
     if chrome_debug_alive():
         return False
     exe = next((p for p in CHROME_PATHS if os.path.exists(p)), None)
     if not exe:
         raise RuntimeError("크롬(chrome.exe)을 찾을 수 없습니다.")
     os.makedirs(PROFILE_DIR, exist_ok=True)
-    subprocess.Popen([exe, "--remote-debugging-port=9222", f"--user-data-dir={PROFILE_DIR}", SITE + "/"])
+    args = [exe, "--remote-debugging-port=9222", f"--user-data-dir={PROFILE_DIR}"]
+    if hidden:
+        args += ["--headless=new", "--window-size=1400,1000"]
+        ua = _normal_user_agent(exe)
+        if ua:
+            args.append(f"--user-agent={ua}")
+    subprocess.Popen(args + [SITE + "/"])
+    try:
+        with open(CHROME_MODE_PATH, "w", encoding="utf-8") as f:
+            f.write("hidden" if hidden else "window")
+    except OSError:
+        pass
     return True
 
 
-def ensure_chrome(timeout=20):
-    """자동화용 크롬이 꺼져 있으면 켜고, 연결될 때까지 기다린다."""
+def close_chrome():
+    """자동화용 크롬 종료."""
+    if not chrome_debug_alive():
+        return
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser = pw.chromium.connect_over_cdp(CDP_URL)
+        try:
+            browser.new_browser_cdp_session().send("Browser.close")
+        except Exception:
+            pass
+    for _ in range(20):
+        if not chrome_debug_alive():
+            return
+        time.sleep(0.25)
+
+
+def ensure_chrome(hidden=False, timeout=20):
+    """자동화용 크롬이 꺼져 있으면 켜고, 연결될 때까지 기다린다.
+    창을 보여 달라는데(hidden=False) 백그라운드로 떠 있으면 껐다가 창으로 다시 켠다."""
+    if not hidden and chrome_mode() == "hidden":
+        close_chrome()
     if chrome_debug_alive():
         return
-    open_chrome()
+    open_chrome(hidden)
     end = time.time() + timeout
     while time.time() < end:
         if chrome_debug_alive():
             return
         time.sleep(0.5)
     raise RuntimeError("자동화용 크롬을 켰지만 연결되지 않았습니다. 잠시 뒤 다시 눌러 주세요.")
+
+
+# ---------------------------------------------------------------- 설정
+SETTINGS_PATH = os.path.join(APP_DATA_DIR, "settings.json")
+
+
+def load_settings():
+    try:
+        with open(SETTINGS_PATH, encoding="utf-8") as f:
+            return {"hide_chrome": True, **json.load(f)}
+    except Exception:
+        return {"hide_chrome": True}
+
+
+def save_settings(**kw):
+    s = load_settings()
+    s.update(kw)
+    os.makedirs(APP_DATA_DIR, exist_ok=True)
+    with open(SETTINGS_PATH, "w", encoding="utf-8") as f:
+        json.dump(s, f, ensure_ascii=False)
 
 
 # ---------------------------------------------------------------- 로그인 정보 (DPAPI 암호화)
@@ -169,12 +248,16 @@ def auto_login(page, user_id, password):
     return False
 
 
-def get_page(pw):
+def get_page(pw, show=False):
+    """show=True 면 크롬 창을 보이게 띄운다. 아니면 로그인 정보가 있고 '창 숨기기'가 켜져 있을 때
+    창 없이 백그라운드로 띄운다."""
     creds = load_credentials()
-    if not chrome_debug_alive():
+    if show:
+        ensure_chrome(hidden=False)
+    elif not chrome_debug_alive():
         if not creds:
-            raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '자동화 크롬 열기'를 누르고 로그인해 주세요.")
-        ensure_chrome()
+            raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '크롬 창 열기'를 누르고 로그인하거나, '로그인 정보'를 저장해 주세요.")
+        ensure_chrome(hidden=load_settings()["hide_chrome"])
     browser = pw.chromium.connect_over_cdp(CDP_URL)
     ctx = browser.contexts[0]
     page = next((p for p in ctx.pages if "goodeos.co.kr" in p.url), None)
@@ -189,7 +272,7 @@ def get_page(pw):
                             "'로그인 정보'에 아이디/비밀번호를 저장해 주세요.")
         if not auto_login(page, *creds):
             raise NeedLogin("자동 로그인에 실패했습니다. '로그인 정보'의 아이디/비밀번호를 확인하거나 "
-                            "자동화용 크롬 창에서 직접 로그인해 주세요.")
+                            "'크롬 창 열기'를 눌러 직접 로그인해 주세요.")
         page.goto(SITE + "/main/main.php")
         page.wait_for_load_state()
     close_notices(page)
@@ -400,8 +483,9 @@ def build_report(missing, absent_reg, n_users, n_absent, service_people):
 
 # ---------------------------------------------------------------- 전체 실행
 def check_status():
-    """'off'(자동화 크롬 꺼짐) / 'login'(로그인 필요) / 'ok'(goodeos 로그인됨)"""
-    if not chrome_debug_alive():
+    """'off'(자동화 크롬 꺼짐) / 'login'(로그인 필요) / 'ok'(goodeos 로그인됨) / 'ok_hidden'(백그라운드에서 로그인됨)"""
+    mode = chrome_mode()
+    if mode is None:
         return "off"
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
@@ -413,7 +497,7 @@ def check_status():
                 for fr in page.frames:
                     try:
                         if "로그아웃" in fr.evaluate("document.body ? document.body.innerText : ''"):
-                            return "ok"
+                            return "ok_hidden" if mode == "hidden" else "ok"
                     except Exception:
                         pass
     return "login"
@@ -584,6 +668,7 @@ FONT = "맑은 고딕"
 
 STATUS_STYLE = {  # 상태: (배경, 글자, 문구)
     "ok": ("#DCFCE7", "#166534", "goodeos 로그인됨"),
+    "ok_hidden": ("#DCFCE7", "#166534", "goodeos 로그인됨 · 크롬 백그라운드"),
     "login": ("#FEF3C7", "#92400E", "goodeos 로그인이 필요해요"),
     "off": ("#F1F5F9", "#475569", "자동화 크롬이 꺼져 있어요"),
     "check": ("#F1F5F9", "#475569", "상태 확인 중..."),
@@ -696,7 +781,7 @@ def main_gui():
     pill.pack(side="left")
     btn_check = RoundButton(bar, "점검 시작", lambda: do_check(), kind="primary")
     btn_check.pack(side="right")
-    btn_chrome = RoundButton(bar, "자동화 크롬 열기", lambda: do_open(), kind="secondary")
+    btn_chrome = RoundButton(bar, "크롬 창 열기", lambda: do_open(), kind="secondary")
     btn_chrome.pack(side="right", padx=(0, 8))
     btn_login = RoundButton(bar, "로그인 정보", lambda: do_login_settings(), kind="secondary")
     btn_login.pack(side="right", padx=(0, 8))
@@ -829,14 +914,14 @@ def main_gui():
                 return
             busy["v"] = True
             btn_check.set_enabled(False)
-            set_progress(0, "크롬을 켜고 자동으로 로그인하는 중...")
+            set_progress(0, "크롬 창을 열고 자동으로 로그인하는 중...")
 
             def work():
                 from playwright.sync_api import sync_playwright
                 try:
                     with sync_playwright() as pw:
-                        get_page(pw)
-                    ui(lambda: set_progress(0, "로그인했어요. 점검 시작을 눌러 주세요."))
+                        get_page(pw, show=True)
+                    ui(lambda: set_progress(0, "크롬 창을 열고 로그인했어요."))
                 except Exception as e:
                     msg = str(e)
                     ui(lambda: set_progress(0, msg, True))
@@ -847,6 +932,8 @@ def main_gui():
             threading.Thread(target=work, daemon=True).start()
             return
         try:
+            if chrome_mode() == "hidden":
+                close_chrome()
             opened = open_chrome()
         except Exception as e:
             set_progress(0, str(e), True)
@@ -875,8 +962,12 @@ def main_gui():
             e.insert(0, value)
             e.pack(fill="x", pady=(2, 10), ipady=3)
             entries.append(e)
+        hide_var = tk.BooleanVar(value=load_settings()["hide_chrome"])
+        tk.Checkbutton(body, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=hide_var,
+                       font=F(9), bg=C_BG, fg=C_TEXT, activebackground=C_BG,
+                       selectcolor=C_BG, anchor="w").pack(fill="x")
         btns = tk.Frame(body, bg=C_BG)
-        btns.pack(fill="x", pady=(6, 0))
+        btns.pack(fill="x", pady=(10, 0))
 
         def save():
             uid, pwd = entries[0].get().strip(), entries[1].get()
@@ -885,6 +976,7 @@ def main_gui():
                 return
             try:
                 save_credentials(uid, pwd)
+                save_settings(hide_chrome=bool(hide_var.get()))
             except Exception as e:
                 messagebox.showerror("로그인 정보", f"저장하지 못했어요: {e}", parent=win)
                 return
@@ -917,7 +1009,7 @@ def main_gui():
                 data = run_daily_check(lambda m: None, lambda p, m: ui(lambda: set_progress(p, m)))
                 ui(lambda: show_results(data))
                 ui(lambda: set_progress(100, f"완료 · 통계 {data['n_stats']}건 읽음 · {time.time() - t0:.0f}초"))
-                ui(lambda: set_status("ok"))
+                ui(refresh_status)
             except NeedLogin as e:
                 msg = str(e)
                 ui(lambda: set_progress(0, msg, True))
@@ -1011,6 +1103,16 @@ def main_gui():
             ui(lambda: (root.destroy(), os._exit(0)))
         threading.Thread(target=work, daemon=True).start()
 
+    def on_close():
+        # 백그라운드 크롬은 눈에 안 보이니 프로그램을 닫을 때 같이 끈다
+        try:
+            if chrome_mode() == "hidden":
+                close_chrome()
+        except Exception:
+            pass
+        root.destroy()
+
+    root.protocol("WM_DELETE_WINDOW", on_close)
     set_status("check")
     threading.Thread(target=check_update, daemon=True).start()
     root.after(300, poll_status)
