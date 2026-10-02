@@ -49,7 +49,15 @@ class NeedLogin(Exception):
 
 # ---------------------------------------------------------------- 크롬 연결
 def chrome_debug_alive():
+    """자동화용 크롬(9222 포트)이 켜져 있는지.
+    윈도우는 닫힌 포트에 연결하면 거절 응답을 받고도 몇 번 다시 시도해서 2초쯤 걸린다.
+    켜져 있으면 1ms 안에 연결되므로 0.3초 안에 안 되면 꺼진 것으로 본다."""
+    import socket
     import urllib.request
+    try:
+        socket.create_connection(("127.0.0.1", 9222), timeout=0.3).close()
+    except OSError:
+        return False
     try:
         urllib.request.urlopen(CDP_URL + "/json/version", timeout=2)
         return True
@@ -72,17 +80,17 @@ def chrome_mode():
         return "window"
 
 
+_hidden_proc = {"p": None}  # 이번에 켠 프로그램이 띄운 백그라운드 크롬 (프로세스 핸들)
+
+
 def kill_hidden_chrome_now():
-    """프로그램을 닫을 때: 켤 때 기억해 둔 프로세스 번호로 백그라운드 크롬을 바로 끈다.
-    (Playwright 를 새로 켜서 종료 명령을 보내면 1~2초 걸려 창이 늦게 닫힘) 기다리지 않는다."""
-    try:
-        with open(CHROME_MODE_PATH, encoding="utf-8") as f:
-            parts = f.read().split()
-    except OSError:
-        return
-    if len(parts) == 2 and parts[0] == "hidden" and parts[1].isdigit() and chrome_debug_alive():
-        # 번호가 다른 프로그램에 다시 쓰였을 수 있으니 chrome.exe 일 때만
-        subprocess.Popen(["taskkill", "/F", "/T", "/FI", "IMAGENAME eq chrome.exe", "/PID", parts[1]],
+    """프로그램을 닫을 때: 이 프로그램이 띄운 백그라운드 크롬을 바로 끈다.
+    확인 작업 없이 종료 명령만 보내고 기다리지 않아서 창이 바로 닫힌다.
+    핸들을 쥐고 있어서 그 크롬이 아직 살아 있을 때만 끈다 (번호가 다른 프로그램에 다시 쓰였을 걱정 없음)."""
+    proc = _hidden_proc["p"]
+    _hidden_proc["p"] = None
+    if proc is not None and proc.poll() is None:
+        subprocess.Popen(["taskkill", "/F", "/T", "/PID", str(proc.pid)],
                          stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
 
@@ -115,6 +123,7 @@ def open_chrome(hidden=False):
         if ua:
             args.append(f"--user-agent={ua}")
     proc = subprocess.Popen(args + [SITE + "/"])
+    _hidden_proc["p"] = proc if hidden else None
     try:
         with open(CHROME_MODE_PATH, "w", encoding="utf-8") as f:
             f.write(f"hidden {proc.pid}" if hidden else "window")
