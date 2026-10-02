@@ -24,7 +24,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "1.2.0"
+APP_VERSION = "1.2.1"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -564,12 +564,35 @@ def _parse_version(text):
     return tuple(nums)
 
 
+def _fetch_latest_by_page():
+    """API가 막혔을 때(요청 횟수 제한 등): github.com/…/releases/latest 가 넘겨 주는 주소에서 태그를 읽는다."""
+    import urllib.request
+    req = urllib.request.Request(f"https://github.com/{UPDATE_REPO}/releases/latest",
+                                 headers={"User-Agent": f"care-helper/{APP_VERSION}"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        final = resp.geturl()
+    m = re.search(r"/releases/tag/([^/?#]+)", final)
+    if not m:
+        return None
+    tag = m.group(1)
+    ver = ".".join(str(n) for n in _parse_version(tag))
+    return {
+        "version": ver,
+        "asset_url": f"https://github.com/{UPDATE_REPO}/releases/download/{tag}/CareHelper-{ver}.exe",
+        "asset_size": 0,
+        "page_url": final,
+    }
+
+
 def fetch_latest_release():
     import urllib.request
     req = urllib.request.Request(UPDATE_API_URL, headers={
         "Accept": "application/vnd.github+json", "User-Agent": f"care-helper/{APP_VERSION}"})
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        data = json.loads(resp.read().decode("utf-8"))
+    try:
+        with urllib.request.urlopen(req, timeout=10) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+    except Exception:
+        return _fetch_latest_by_page()
     tag = data.get("tag_name") or ""
     if data.get("draft") or not re.search(r"\d", tag):
         return None
@@ -585,6 +608,42 @@ def fetch_latest_release():
 def _update_paths():
     exe = Path(sys.executable)
     return exe, exe.with_name(exe.stem + ".new.exe"), exe.with_name(exe.stem + ".old.exe")
+
+
+USER_INSTALL_EXE = Path(APP_DATA_DIR) / "CareHelper.exe"  # 관리자 권한 없이 쓸 수 있는 설치 위치
+
+
+def _folder_writable(folder):
+    test = Path(folder) / f".write_test_{os.getpid()}"
+    try:
+        test.write_bytes(b"")
+        test.unlink()
+        return True
+    except OSError:
+        return False
+
+
+def _replace_retry(src, dst, tries=10):
+    """OneDrive 동기화·백신 검사로 파일이 잠깐 잠겨 있을 수 있어서 몇 번 다시 시도한다."""
+    for i in range(tries):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            if i == tries - 1:
+                raise
+            time.sleep(0.5)
+
+
+def _make_desktop_shortcut(target):
+    """바탕화면에 '맞춤돌봄도우미' 바로가기를 만든다(있으면 새 위치로 바꿈)."""
+    ps = (
+        "$d=[Environment]::GetFolderPath('Desktop');"
+        f"$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d '{APP_NAME}.lnk'));"
+        f"$s.TargetPath='{target}';$s.WorkingDirectory='{Path(target).parent}';$s.Save()"
+    )
+    subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+                   creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=20)
 
 
 def cleanup_old_update_files():
@@ -609,7 +668,7 @@ def update_error_text(err):
     if isinstance(err, (urllib.error.URLError, socket.timeout, TimeoutError, ConnectionError)):
         return "인터넷 연결을 확인한 뒤 다시 눌러주세요."
     if isinstance(err, PermissionError):
-        return "프로그램 파일을 바꿀 권한이 없습니다. 바탕화면이나 문서 폴더에 두고 실행해 주세요."
+        return "프로그램 파일이 다른 프로그램(OneDrive·백신 등)에 잡혀 있어요. 잠시 후 다시 눌러 주세요."
     return "알 수 없는 문제로 업데이트하지 못했습니다. 잠시 후 다시 눌러주세요."
 
 
@@ -617,6 +676,10 @@ def download_and_install_update(info, on_progress=None):
     """새 exe 를 받아 현재 exe 와 바꾸고 다시 실행한다."""
     import urllib.request
     exe, new, old = _update_paths()
+    relocate = not _folder_writable(exe.parent)
+    if relocate:  # 프로그램 폴더에 쓸 권한이 없으면 사용자 폴더에 설치하고 바로가기를 만든다
+        os.makedirs(APP_DATA_DIR, exist_ok=True)
+        new = USER_INSTALL_EXE.with_name(USER_INSTALL_EXE.stem + ".new.exe")
     req = urllib.request.Request(info["asset_url"], headers={"User-Agent": f"care-helper/{APP_VERSION}"})
     expected = info.get("asset_size") or 0
     done = 0
@@ -638,20 +701,33 @@ def download_and_install_update(info, on_progress=None):
         except OSError:
             pass
         raise RuntimeError("받은 파일이 올바른 프로그램 파일이 아닙니다. 잠시 후 다시 시도해 주세요.")
+    if relocate:
+        _replace_retry(new, USER_INSTALL_EXE)
+        try:
+            _make_desktop_shortcut(USER_INSTALL_EXE)
+        except Exception:
+            pass
+        exe = USER_INSTALL_EXE
+    else:
+        _install_in_place(exe, new, old)
+    env = os.environ.copy()
+    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
+    subprocess.Popen([str(exe)], cwd=str(exe.parent), env=env, close_fds=True)
+    return relocate
+
+
+def _install_in_place(exe, new, old):
     if old.exists():
         try:
             old.unlink()
         except OSError:
             old = exe.with_name(f"{exe.stem}.old{time.strftime('%H%M%S')}.exe")
-    os.replace(exe, old)
+    _replace_retry(exe, old)
     try:
-        os.replace(new, exe)
+        _replace_retry(new, exe)
     except OSError:
         os.replace(old, exe)
         raise
-    env = os.environ.copy()
-    env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
-    subprocess.Popen([str(exe)], cwd=str(exe.parent), env=env, close_fds=True)
 
 
 # ---------------------------------------------------------------- 화면
@@ -845,7 +921,10 @@ def main_gui():
     foot = tk.Frame(outer, bg=C_BG)
     foot.pack(fill="x", pady=(8, 0))
     tk.Label(foot, text="결과는 업무\\일일실적 폴더에 저장돼요", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="left")
-    tk.Label(foot, text=f"v{APP_VERSION}", font=F(9), bg=C_BG, fg=C_MUTED).pack(side="right")
+    ver_label = tk.Label(foot, text=f"v{APP_VERSION} · 업데이트 확인", font=F(9), bg=C_BG, fg=C_MUTED,
+                         cursor="hand2")
+    ver_label.pack(side="right")
+    ver_label.bind("<Button-1>", lambda e: threading.Thread(target=check_update, args=(True,), daemon=True).start())
 
     # ================= 동작 =================
     def ui(fn):
@@ -1055,13 +1134,25 @@ def main_gui():
             upd["btn"].pack()
             blink()
 
-    def check_update():
+    def check_update(manual=False):
+        if manual:
+            ui(lambda: set_progress(prog["value"], "새 버전이 있는지 확인하는 중..."))
         try:
             info = fetch_latest_release()
         except Exception:
+            if manual:
+                ui(lambda: set_progress(0, "업데이트를 확인하지 못했어요. 인터넷 연결을 확인해 주세요.", True))
             return
         if info and _parse_version(info["version"]) > _parse_version(APP_VERSION):
             ui(lambda: show_update_button(info))
+            if manual:
+                ui(lambda: set_progress(prog["value"], f"새 버전 v{info['version']}이 있어요. 오른쪽 위 업데이트를 눌러 주세요."))
+        elif manual:
+            ui(lambda: set_progress(prog["value"], f"지금 최신 버전(v{APP_VERSION})이에요."))
+
+    def poll_update():  # 켜 둔 채로 있어도 새 버전을 알 수 있게 1시간마다 확인
+        root.after(1000, poll_update)
+        root.after(60 * 60 * 1000, poll_update)
 
     def do_update():
         info = upd["info"]
@@ -1086,7 +1177,7 @@ def main_gui():
 
         def work():
             try:
-                download_and_install_update(
+                relocated = download_and_install_update(
                     info, lambda p: ui(lambda: set_progress(p, f"업데이트 받는 중... {p}%")))
             except Exception as e:
                 err = update_error_text(e)
@@ -1100,7 +1191,14 @@ def main_gui():
                     blink()
                 ui(failed)
                 return
-            ui(lambda: (root.destroy(), os._exit(0)))
+            def done():
+                if relocated:
+                    messagebox.showinfo(
+                        "업데이트", "지금 폴더에는 파일을 바꿀 권한이 없어서, 관리자 권한 없이 쓸 수 있는 곳에 "
+                                    "새 버전을 설치했어요.\n앞으로는 바탕화면의 '맞춤돌봄도우미' 바로가기로 실행해 주세요.")
+                root.destroy()
+                os._exit(0)
+            ui(done)
         threading.Thread(target=work, daemon=True).start()
 
     def on_close():
