@@ -289,12 +289,27 @@ class Interpreter:
                 pick = self.match_unknown(ic, w, body, rows)
                 if pick:
                     names.append((pos, pick))
+        if not names:  # 다른 지원사 담당 어르신 이름이 그대로 적혀 있는 경우
+            for pos, w in loose_words(body):
+                other = [r for r in self.roster if r["성명"] == w and r.get("생활지원사") != ic
+                         and r.get("이용상태") not in STATUS_BLOCK]
+                if len(other) == 1:
+                    o = other[0]["생활지원사"]
+                    yes = f"{o} 선생님 일정으로 처리"
+                    pick = self.ask(f"'{w}' 어르신은 {ic} 선생님이 아니라 {o} 선생님 담당이에요. 어떻게 할까요?\n\n"
+                                    f"{body[:200]}", {yes: None, "건너뛰기": "처리하지 않음"})
+                    if pick == yes:
+                        ic, rows = o, self.clients_of(o)
+                        names.append((pos, w))
+                    break
         if not names and times:
             pick = self.ask(f"[{ic}] 누구 일정인지 모르겠어요. 어느 어르신이에요?\n\n{body[:200]}",
                             {r["성명"]: self._client_desc(r["성명"], rows) for r in rows
                              if r.get("이용상태") not in STATUS_BLOCK})
             if pick:
                 names.append((0, pick))
+            else:
+                return [Item(ic=ic, source=body, action="기타", status="사람 처리", note="대상자를 모름")]
         names.sort()
         dates = find_dates(body, msg_date)
         kinds = find_kinds(body)
