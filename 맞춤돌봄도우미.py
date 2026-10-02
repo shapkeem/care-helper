@@ -525,6 +525,8 @@ def run_daily_check(log, progress=lambda pct, msg: None):
             progress(60, "통계(서비스현황 일별) 읽는 중...")
             log("통계(서비스현황 일별) 읽는 중...")
             service_people = collect_service_people(page, log)
+            if chrome_mode() == "hidden":  # 백그라운드 크롬은 켜 두면 PC가 느려지니 다 쓰면 끈다
+                close_chrome(pw)
         progress(90, "명단 대조하는 중...")
         users_df = read_list(users_path)
         absent_df = read_list(absent_path) if has_absent else []

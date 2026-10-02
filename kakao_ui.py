@@ -153,8 +153,12 @@ def build_page(parent, RoundButton, F, busy, app):
         """작업 스레드에서 호출: 창에 질문을 띄우고 답을 기다린다. 자유 답변은 Jev 로 보기에 맞춘다."""
         base = question
         while True:
+            if state["stop"]:
+                return None
             show_question(question, options)
             a = answers.get()
+            if state["stop"]:
+                return None
             if a is None or a in options:
                 if a is not None:
                     log(f"답변: {a}")
@@ -185,6 +189,8 @@ def build_page(parent, RoundButton, F, busy, app):
                 ip = kakao.Interpreter(roster, ask_user, today)
                 items = []
                 for i, (sender, d, body) in enumerate(msgs, 1):
+                    if state["stop"]:
+                        break
                     ui(lambda i=i: status.configure(text=f"해석 중... ({i}/{len(msgs)})"))
                     for it in ip.interpret(sender, d, body):
                         items.append(it)
@@ -210,7 +216,9 @@ def build_page(parent, RoundButton, F, busy, app):
                         log(f"  오류: {e}")
                     set_row(it)
                 done = sum(it.status == "완료" for it in items)
-                ui(lambda: status.configure(text=f"끝 · 완료 {done}건 / 전체 {len(items)}건"))
+                head = "멈춤" if state["stop"] else "끝"
+                ui(lambda: status.configure(text=f"{head} · 완료 {done}건 / 전체 {len(items)}건"))
+                close_hidden_chrome(pw)
         except (jev.JevError, g.WorkError, app.NeedLogin) as e:
             msg = str(e)
             ui(lambda: status.configure(text=msg))
@@ -220,16 +228,37 @@ def build_page(parent, RoundButton, F, busy, app):
             ui(lambda: status.configure(text=msg))
             log(msg)
         finally:
+            try:  # 오류로 끝났어도 백그라운드 크롬은 끈다
+                if app.chrome_mode() == "hidden":
+                    app.close_chrome()
+            except Exception:
+                pass
             state["running"] = False
             busy["v"] = False
+            ui(lambda: qbox.pack_forget())
+
+    def close_hidden_chrome(pw):
+        """백그라운드 크롬은 작업이 끝나면 끈다 (켜 두면 PC가 느려짐)."""
+        try:
+            if app.chrome_mode() == "hidden":
+                app.close_chrome(pw)
+                log("백그라운드 크롬을 껐어요")
+        except Exception:
+            pass
 
     def start():
-        if state["running"] or busy["v"]:
-            status.configure(text="다른 작업이 진행 중이에요.")
+        if state["running"]:
+            status.configure(text="앞 작업이 아직 진행 중이에요. 질문에 답하거나 '멈춤'을 눌러 주세요.")
+            return
+        if busy["v"]:
+            status.configure(text="일일실적 점검이 진행 중이에요. 끝난 뒤에 눌러 주세요.")
             return
         text = txt.get("1.0", "end").strip()
         if not text:
+            status.configure(text="카톡 내용을 먼저 붙여넣어 주세요.")
             return
+        while not answers.empty():  # 지난 작업에서 남은 답 비우기
+            answers.get_nowait()
         state.update(running=True, stop=False)
         busy["v"] = True
         for i in tree.get_children():
@@ -239,7 +268,9 @@ def build_page(parent, RoundButton, F, busy, app):
     def stop():
         if state["running"]:
             state["stop"] = True
-            status.configure(text="지금 하던 것까지만 하고 멈출게요.")
+            qbox.pack_forget()
+            answers.put(None)  # 질문에 답을 기다리던 중이면 바로 풀어 준다
+            status.configure(text="멈추는 중이에요. 사이트에서 하던 단계만 마치고 멈춰요.")
 
     RoundButton(bar, "멈춤", stop, height=34, padx=14, size=9).pack(side="right")
     RoundButton(bar, "처리 시작", start, kind="primary", height=34, padx=16, size=9).pack(side="right", padx=(0, 6))

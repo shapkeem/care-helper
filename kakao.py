@@ -29,6 +29,14 @@ ACTIONS = {
            "questions, greetings, files, group schedules (단체일정), notices.",
 }
 
+ACTION_LABELS = {  # 화면에 보여 줄 한국어 설명 (ACTIONS 는 Jev 용)
+    "실적": "실적 등록 (이미 있는 일정에 실적 넣기)",
+    "일정등록": "일정 등록 (빠진 일정 넣기, 지난 시간이면 실적까지)",
+    "수정": "일정 수정 (시간·서비스·어르신 바꾸기)",
+    "삭제": "일정 삭제·취소",
+    "기타": "일정/실적 요청이 아님 (사람이 처리)",
+}
+
 
 @dataclass
 class Item:
@@ -205,6 +213,18 @@ def find_names(text, clients):
     return sorted(found), sorted(unknown), sorted(ambiguous)
 
 
+def loose_words(text):
+    """이름일 수도 있는 한글 낱말 (2~4글자, 흔한 업무 낱말 제외)."""
+    out = []
+    for m in re.finditer(r"[가-힣]{2,4}", text):
+        w = m.group(0)
+        if w in NAME_STOP or any(k in w for k in list(KINDS) + EXCLUDED) or \
+                re.search(r"(부탁|드립|합니|니다|해주|주세|어르신|어른신|선생|실적|일정|수정|삭제|입력|변경|요일)", w):
+            continue
+        out.append((m.start(), w))
+    return out
+
+
 # ---------------------------------------------------------------- 해석
 class Interpreter:
     def __init__(self, roster, ask_user, today=None):
@@ -263,8 +283,19 @@ class Interpreter:
             pick = self.match_unknown(ic, w, body, rows)
             if pick:
                 names.append((pos, pick))
-        names.sort()
         times = find_times(body)
+        if not names:  # 이름 뒤에 '어르신' 같은 말이 없을 때: 낱말을 하나씩 명단과 맞춰 본다
+            for pos, w in loose_words(body):
+                pick = self.match_unknown(ic, w, body, rows)
+                if pick:
+                    names.append((pos, pick))
+        if not names and times:
+            pick = self.ask(f"[{ic}] 누구 일정인지 모르겠어요. 어느 어르신이에요?\n\n{body[:200]}",
+                            {r["성명"]: self._client_desc(r["성명"], rows) for r in rows
+                             if r.get("이용상태") not in STATUS_BLOCK})
+            if pick:
+                names.append((0, pick))
+        names.sort()
         dates = find_dates(body, msg_date)
         kinds = find_kinds(body)
         if not names and not times:
@@ -362,8 +393,7 @@ class Interpreter:
             a = ans[f"a{i}"]
             it.action = a["choice"]
             if a["confidence"] < CONF_OK:
-                pick = self.ask(f"{it.label()}\n이 요청은 무엇인가요?\n\n{body[:200]}",
-                                {k: v.split(".")[0] for k, v in ACTIONS.items()})
+                pick = self.ask(f"{it.label()}\n이 요청은 무엇인가요?\n\n{body[:200]}", dict(ACTION_LABELS))
                 it.action = pick or "기타"
 
     # ---- 자유 답변 해석 (UI 에서 사용)
