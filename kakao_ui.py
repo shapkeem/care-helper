@@ -5,9 +5,7 @@ Jev(TypeSafe) 사용은 기관 결재·정부 승인·TypeSafe 협약을 마친 
 """
 import os
 import queue
-import tempfile
 import threading
-import time
 from datetime import date, datetime
 
 import goodeos_work as g
@@ -15,20 +13,40 @@ import jev
 import kakao
 import runner
 
-_roster = {"rows": None, "at": 0}
+ROSTER_DIR = r"C:\맞춤돌봄도우미"  # 문서 폴더는 OneDrive 라서 C 드라이브에 둔다
+_roster = {"rows": None, "day": None}
 
 
-def load_roster(app, page, log):
-    """대상자조회 이용상태 '전체' 출력 → 명단 (30분 동안 다시 받지 않음)."""
-    if _roster["rows"] is not None and time.time() - _roster["at"] < 1800:
+def load_roster(app, page, today, log):
+    """대상자 명단(이용상태 '전체')은 하루에 한 번만 받는다.
+    C:\\맞춤돌봄도우미\\대상자리스트YYYY.MM.DD.xls 가 오늘(서버 날짜) 것이면 그대로 쓰고,
+    아니면 지난 명단을 지우고 새로 받는다."""
+    if _roster["rows"] is not None and _roster["day"] == today:
         return _roster["rows"]
-    log("대상자 명단(전체) 받는 중...")
-    with tempfile.TemporaryDirectory(prefix="care_helper_") as tmp:
-        p = os.path.join(tmp, "all.xls")
-        if not app.download_list(page, "all", p, log):
+    if not os.path.exists("C:\\"):
+        raise g.WorkError("이 PC에 C 드라이브가 없어서 대상자 명단을 저장할 수 없어요.")
+    try:
+        os.makedirs(ROSTER_DIR, exist_ok=True)
+    except OSError as e:
+        raise g.WorkError(f"C:\\맞춤돌봄도우미 폴더를 만들지 못했어요: {e}")
+    name = f"대상자리스트{today:%Y.%m.%d}.xls"
+    path = os.path.join(ROSTER_DIR, name)
+    if not os.path.exists(path):
+        for f in os.listdir(ROSTER_DIR):  # 지난 명단 지우기
+            if f.startswith("대상자리스트") and f.endswith(".xls") and f != name:
+                try:
+                    os.remove(os.path.join(ROSTER_DIR, f))
+                except OSError:
+                    pass
+        log("오늘 대상자 명단(전체) 받는 중...")
+        tmp = path + ".part"
+        if not app.download_list(page, "all", tmp, log):
             raise g.WorkError("대상자 명단을 받지 못했어요.")
-        rows = app.read_list(p)
-    _roster.update(rows=rows, at=time.time())
+        os.replace(tmp, path)
+    else:
+        log(f"오늘 받은 대상자 명단 사용 ({name})")
+    rows = app.read_list(path)
+    _roster.update(rows=rows, day=today)
     log(f"대상자 명단 {len(rows)}명")
     return rows
 
@@ -176,16 +194,18 @@ def build_page(parent, RoundButton, F, busy, app):
     def work(text):
         from playwright.sync_api import sync_playwright
         try:
-            today = date.today()
-            msgs = kakao.split_messages(text, today)
-            if not msgs:
+            if not kakao.split_messages(text, date.today()):
                 ui(lambda: status.configure(text="요청을 찾지 못했어요. '[이름] [오후 1:23] 내용' 형식으로 붙여넣어 주세요."))
                 return
             with sync_playwright() as pw:
                 ui(lambda: status.configure(text="goodeos 연결 중..."))
                 page = app.get_page(pw)
                 dlg = g.Dialogs(page)
-                roster = load_roster(app, page, log)
+                offset = g.server_offset(page)  # '오늘'과 지난 시간 판단은 PC 시계 말고 goodeos 서버 시각으로
+                now = lambda: datetime.now() + offset
+                today = now().date()
+                msgs = kakao.split_messages(text, today)
+                roster = load_roster(app, page, today, log)
                 ip = kakao.Interpreter(roster, ask_user, today)
                 items = []
                 for i, (sender, d, body) in enumerate(msgs, 1):
@@ -206,7 +226,7 @@ def build_page(parent, RoundButton, F, busy, app):
                     set_row(it)
                     log(f"▶ {it.label()}")
                     try:
-                        runner.run_item(page, dlg, it, ask_user, log)
+                        runner.run_item(page, dlg, it, ask_user, log, now=now())
                         it.status, it.note = "완료", ""
                     except g.WorkError as e:
                         it.status, it.note = ("건너뜀", "") if str(e) == "건너뜀" else ("확인 필요", str(e))

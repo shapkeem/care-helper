@@ -44,6 +44,20 @@ def is_past(d, end_hhmm, now=None):
     return end <= now
 
 
+def server_offset(page):
+    """goodeos 서버 시각 - 이 PC 시각. 서버 응답의 Date 머리글(UTC)을 한국 시간으로 바꿔 쓴다.
+    못 받으면 0 (PC 시계 사용)."""
+    from datetime import timezone
+    from email.utils import parsedate_to_datetime
+    try:
+        hdr = page.evaluate("() => fetch(location.origin + '/main/main.php', {method: 'HEAD', cache: 'no-store'})"
+                            ".then(r => r.headers.get('date'))")
+        srv = parsedate_to_datetime(hdr).astimezone(timezone(timedelta(hours=9))).replace(tzinfo=None)
+        return srv - datetime.now()
+    except Exception:
+        return timedelta(0)
+
+
 def _settle(page, ms=150, timeout=20):
     """사이트의 ajax(jQuery) 요청이 다 끝날 때까지 기다린다.
     networkidle 은 구글 분석 통신 때문에 거의 매번 최대 시간까지 기다려서 쓰지 않는다.

@@ -18,7 +18,7 @@ import sys
 import threading
 import time
 import traceback
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from html.parser import HTMLParser
 
@@ -459,11 +459,11 @@ def read_service_people(page, service, log):
     return [tuple(p) for p in people]
 
 
-def collect_service_people(page, log):
+def collect_service_people(page, log, day=None):
     page.goto(STAT_URL)
     page.wait_for_load_state()
     close_notices(page)
-    today = date.today().strftime("%Y-%m-%d")
+    today = (day or date.today()).strftime("%Y-%m-%d")
     if page.input_value("#date") != today:
         page.fill("#date", today)
     page.check('input[name=search_gbn][value="2"]')  # 단체서비스 포함 보기
@@ -503,14 +503,14 @@ def person_block(r, kind):
             f"담당생활지원사 전화번호:{phone}"]
 
 
-def build_report(missing, absent_reg, n_users, n_absent, service_people):
+def build_report(missing, absent_reg, n_users, n_absent, service_people, day=None):
     lines = []
     for r in missing:
         lines += person_block(r, "missing") + [""]
     for r in absent_reg:
         lines += person_block(r, "absent") + [""]
     total = sum(len(v) for v in service_people.values())
-    head = [f"[{date.today():%Y-%m-%d}] 이용자 {n_users}명 / 장기부재 {n_absent}명 / 통계 명단 {total}건",
+    head = [f"[{(day or date.today()):%Y-%m-%d}] 이용자 {n_users}명 / 장기부재 {n_absent}명 / 통계 명단 {total}건",
             f"실적미입력 이용자 {len(missing)}명, 실적등록된 장기부재자 {len(absent_reg)}명", ""]
     if not missing and not absent_reg:
         head.append("모든 이용자에게 실적이 들어가 있고, 장기부재자 실적도 없습니다.")
@@ -548,6 +548,8 @@ def run_daily_check(log, progress=lambda pct, msg: None):
         with sync_playwright() as pw:
             progress(5, "크롬·로그인 확인 중...")
             page = get_page(pw)
+            import goodeos_work  # 날짜는 PC 시계 말고 goodeos 서버 날짜로
+            day = (datetime.now() + goodeos_work.server_offset(page)).date()
             log("로그인 확인 완료, 공지 닫음")
             progress(15, "이용자 명단 받는 중...")
             log("이용자 명단 받는 중...")
@@ -558,7 +560,7 @@ def run_daily_check(log, progress=lambda pct, msg: None):
             has_absent = download_list(page, "01", absent_path, log)
             progress(60, "통계(서비스현황 일별) 읽는 중...")
             log("통계(서비스현황 일별) 읽는 중...")
-            service_people = collect_service_people(page, log)
+            service_people = collect_service_people(page, log, day)
         progress(90, "명단 대조하는 중...")
         users_df = read_list(users_path)
         absent_df = read_list(absent_path) if has_absent else []
@@ -568,7 +570,7 @@ def run_daily_check(log, progress=lambda pct, msg: None):
     stray = {key_of(n, b) for v in service_people.values() for n, b in v} - known
     log(f"대조 검증: 통계 명단 중 리스트에서 못 찾은 사람 {len(stray)}명"
         + (" (이용상태가 이용/장기부재가 아닌 대상자일 수 있음)" if stray else ""))
-    report = build_report(missing, absent_reg, len(users_df), len(absent_df), service_people)
+    report = build_report(missing, absent_reg, len(users_df), len(absent_df), service_people, day)
     total = sum(len(v) for v in service_people.values())
     progress(100, f"완료 · 통계 {total}건 대조")
     return {"report": report, "missing": missing, "absent_reg": absent_reg,
