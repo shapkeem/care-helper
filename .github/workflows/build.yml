@@ -5,6 +5,10 @@ on:
   push:
     branches: ["claude/**"]
     paths: ["맞춤돌봄도우미.py", "icon.ico", ".github/workflows/build.yml"]
+    tags: ["v*"]
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -26,3 +30,10 @@ jobs:
         with:
           name: CareHelper-${{ env.VER }}
           path: dist/CareHelper-${{ env.VER }}.exe
+      - name: 릴리스 만들기 (v* 태그일 때)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ github.ref_name }}
+          body_path: RELEASE_NOTES.md
+          files: dist/CareHelper-${{ env.VER }}.exe
