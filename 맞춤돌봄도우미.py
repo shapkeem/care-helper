@@ -7,7 +7,9 @@
   2. 통계 > 서비스현황(일별) 세 서비스 명단(오늘)을 읽어 이름+생년월일로 대조
   3. 실적미입력 이용자 / 실적이 등록된 장기부재자 결과를 텍스트로 출력
 
-크롬은 '자동화용 크롬'(원격 디버깅 포트 9222)에서 사용자가 직접 로그인한 상태여야 합니다.
+크롬은 '자동화용 크롬'(원격 디버깅 포트 9222)을 씁니다. '로그인 정보'를 저장해 두면
+크롬을 켜고 goodeos에 로그인하는 것까지 자동으로 합니다. (아이디/비밀번호는 윈도우 DPAPI로
+암호화해서 이 PC의 사용자 계정에만 저장)
 """
 import json
 import os
@@ -22,7 +24,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.2.0"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -30,7 +32,9 @@ WORK_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "froze
 OUT_DIR = os.path.join(os.path.expanduser("~"), "OneDrive", "바탕 화면", "업무", "일일실적")
 if not os.path.isdir(os.path.join(os.path.expanduser("~"), "OneDrive", "바탕 화면")):
     OUT_DIR = os.path.join(os.path.expanduser("~"), "Desktop", "업무", "일일실적")
-PROFILE_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME, "chrome_profile")
+APP_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME)
+PROFILE_DIR = os.path.join(APP_DATA_DIR, "chrome_profile")
+CRED_PATH = os.path.join(APP_DATA_DIR, "login.dat")
 CDP_URL = "http://127.0.0.1:9222"
 SITE = "https://goodeos.co.kr"
 LIST_URL = SITE + "/care/care.php?sr=S&type=81&menu=kacold_client&menuTopId=B&menuLeftId=1_01"
@@ -69,19 +73,125 @@ def open_chrome():
     return True
 
 
+def ensure_chrome(timeout=20):
+    """자동화용 크롬이 꺼져 있으면 켜고, 연결될 때까지 기다린다."""
+    if chrome_debug_alive():
+        return
+    open_chrome()
+    end = time.time() + timeout
+    while time.time() < end:
+        if chrome_debug_alive():
+            return
+        time.sleep(0.5)
+    raise RuntimeError("자동화용 크롬을 켰지만 연결되지 않았습니다. 잠시 뒤 다시 눌러 주세요.")
+
+
+# ---------------------------------------------------------------- 로그인 정보 (DPAPI 암호화)
+def _dpapi(data, encrypt):
+    import ctypes
+    from ctypes import wintypes
+
+    class BLOB(ctypes.Structure):
+        _fields_ = [("cbData", wintypes.DWORD), ("pbData", ctypes.POINTER(ctypes.c_char))]
+
+    buf = ctypes.create_string_buffer(data, len(data))
+    src, dst = BLOB(len(data), ctypes.cast(buf, ctypes.POINTER(ctypes.c_char))), BLOB()
+    fn = ctypes.windll.crypt32.CryptProtectData if encrypt else ctypes.windll.crypt32.CryptUnprotectData
+    if not fn(ctypes.byref(src), None, None, None, None, 0, ctypes.byref(dst)):
+        raise ctypes.WinError()
+    try:
+        return ctypes.string_at(dst.pbData, dst.cbData)
+    finally:
+        ctypes.windll.kernel32.LocalFree(dst.pbData)
+
+
+def save_credentials(user_id, password):
+    os.makedirs(APP_DATA_DIR, exist_ok=True)
+    raw = json.dumps({"id": user_id, "pw": password}).encode("utf-8")
+    with open(CRED_PATH, "wb") as f:
+        f.write(_dpapi(raw, True))
+
+
+def load_credentials():
+    """(아이디, 비밀번호) 또는 None."""
+    try:
+        with open(CRED_PATH, "rb") as f:
+            d = json.loads(_dpapi(f.read(), False).decode("utf-8"))
+        return (d["id"], d["pw"]) if d.get("id") and d.get("pw") else None
+    except Exception:
+        return None
+
+
+def delete_credentials():
+    if os.path.exists(CRED_PATH):
+        os.remove(CRED_PATH)
+
+
+def _logged_in(page):
+    for fr in page.frames:
+        try:
+            if "로그아웃" in fr.evaluate("document.body ? document.body.innerText : ''"):
+                return True
+        except Exception:
+            pass
+    return False
+
+
+def auto_login(page, user_id, password):
+    """goodeos 로그인 화면의 아이디/비밀번호 칸을 채우고 로그인한다. 성공하면 True."""
+    page.goto(SITE + "/")
+    page.wait_for_load_state()
+    _wait_settled(page, 800)
+    if _logged_in(page):
+        return True
+    for fr in page.frames:
+        pw_box = fr.locator("input[type=password]:visible")
+        if pw_box.count() == 0:
+            continue
+        pw_box = pw_box.first
+        # 비밀번호 칸 바로 앞의 글자 입력칸을 아이디 칸으로 본다
+        id_box = pw_box.locator(
+            "xpath=preceding::input[not(@type) or @type='text' or @type='email' or @type='tel'][1]")
+        if id_box.count() == 0:
+            continue
+        id_box.fill("")
+        id_box.type(user_id, delay=30)
+        pw_box.fill("")
+        pw_box.type(password, delay=30)
+        pw_box.press("Enter")
+        break
+    else:
+        return False
+    for _ in range(20):
+        _wait_settled(page, 500)
+        if _logged_in(page):
+            return True
+    return False
+
+
 def get_page(pw):
+    creds = load_credentials()
     if not chrome_debug_alive():
-        raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '자동화 크롬 열기'를 누르고 로그인해 주세요.")
+        if not creds:
+            raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '자동화 크롬 열기'를 누르고 로그인해 주세요.")
+        ensure_chrome()
     browser = pw.chromium.connect_over_cdp(CDP_URL)
     ctx = browser.contexts[0]
     page = next((p for p in ctx.pages if "goodeos.co.kr" in p.url), None)
     if page is None:
-        page = ctx.new_page()
+        page = ctx.pages[0] if ctx.pages else ctx.new_page()
     page.on("dialog", lambda d: d.accept())
     page.goto(SITE + "/main/main.php")
     page.wait_for_load_state()
     if "로그아웃" not in page.inner_text("body"):
-        raise NeedLogin("goodeos에 로그인되어 있지 않습니다. 자동화용 크롬 창에서 로그인해 주세요.")
+        if not creds:
+            raise NeedLogin("goodeos에 로그인되어 있지 않습니다. 자동화용 크롬 창에서 로그인하거나 "
+                            "'로그인 정보'에 아이디/비밀번호를 저장해 주세요.")
+        if not auto_login(page, *creds):
+            raise NeedLogin("자동 로그인에 실패했습니다. '로그인 정보'의 아이디/비밀번호를 확인하거나 "
+                            "자동화용 크롬 창에서 직접 로그인해 주세요.")
+        page.goto(SITE + "/main/main.php")
+        page.wait_for_load_state()
     close_notices(page)
     return page
 
@@ -321,7 +431,7 @@ def run_daily_check(log, progress=lambda pct, msg: None):
     tmp_users = os.path.join(OUT_DIR, "_이용_원본.xls")
 
     with sync_playwright() as pw:
-        progress(5, "로그인 확인 중...")
+        progress(5, "크롬·로그인 확인 중...")
         page = get_page(pw)
         log("로그인 확인 완료, 공지 닫음")
         progress(15, "이용자 명단 받는 중...")
@@ -588,6 +698,8 @@ def main_gui():
     btn_check.pack(side="right")
     btn_chrome = RoundButton(bar, "자동화 크롬 열기", lambda: do_open(), kind="secondary")
     btn_chrome.pack(side="right", padx=(0, 8))
+    btn_login = RoundButton(bar, "로그인 정보", lambda: do_login_settings(), kind="secondary")
+    btn_login.pack(side="right", padx=(0, 8))
 
     # ---- 진행 표시
     prog_text = tk.Label(outer, text="준비됐어요. 점검 시작을 눌러 주세요.", font=F(9), bg=C_BG,
@@ -712,6 +824,28 @@ def main_gui():
         canvas.yview_moveto(0)
 
     def do_open():
+        if load_credentials():
+            if busy["v"]:
+                return
+            busy["v"] = True
+            btn_check.set_enabled(False)
+            set_progress(0, "크롬을 켜고 자동으로 로그인하는 중...")
+
+            def work():
+                from playwright.sync_api import sync_playwright
+                try:
+                    with sync_playwright() as pw:
+                        get_page(pw)
+                    ui(lambda: set_progress(0, "로그인했어요. 점검 시작을 눌러 주세요."))
+                except Exception as e:
+                    msg = str(e)
+                    ui(lambda: set_progress(0, msg, True))
+                finally:
+                    busy["v"] = False
+                    ui(lambda: btn_check.set_enabled(True))
+                    ui(refresh_status)
+            threading.Thread(target=work, daemon=True).start()
+            return
         try:
             opened = open_chrome()
         except Exception as e:
@@ -720,6 +854,55 @@ def main_gui():
         set_progress(0, "자동화용 크롬을 열었어요. 로그인한 뒤 점검 시작을 눌러 주세요." if opened
                      else "자동화용 크롬이 이미 열려 있어요.")
         refresh_status()
+
+    def do_login_settings():
+        win = tk.Toplevel(root)
+        win.title("로그인 정보")
+        win.configure(bg=C_BG)
+        win.resizable(False, False)
+        win.transient(root)
+        win.grab_set()
+        body = tk.Frame(win, bg=C_BG, padx=22, pady=18)
+        body.pack(fill="both", expand=True)
+        tk.Label(body, text="goodeos 자동 로그인", font=F(12, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
+        tk.Label(body, text="이 PC의 윈도우 계정에만 암호화해서 저장돼요.", font=F(9), bg=C_BG,
+                 fg=C_MUTED).pack(anchor="w", pady=(2, 12))
+        saved = load_credentials() or ("", "")
+        entries = []
+        for label, value, show in (("아이디", saved[0], ""), ("비밀번호", saved[1], "●")):
+            tk.Label(body, text=label, font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w")
+            e = tk.Entry(body, font=F(11), width=28, show=show, relief="solid", bd=1)
+            e.insert(0, value)
+            e.pack(fill="x", pady=(2, 10), ipady=3)
+            entries.append(e)
+        btns = tk.Frame(body, bg=C_BG)
+        btns.pack(fill="x", pady=(6, 0))
+
+        def save():
+            uid, pwd = entries[0].get().strip(), entries[1].get()
+            if not uid or not pwd:
+                messagebox.showwarning("로그인 정보", "아이디와 비밀번호를 모두 입력해 주세요.", parent=win)
+                return
+            try:
+                save_credentials(uid, pwd)
+            except Exception as e:
+                messagebox.showerror("로그인 정보", f"저장하지 못했어요: {e}", parent=win)
+                return
+            win.destroy()
+            set_progress(0, "로그인 정보를 저장했어요. 이제 점검 시작만 누르면 자동으로 로그인해요.")
+
+        def remove():
+            delete_credentials()
+            win.destroy()
+            set_progress(0, "저장된 로그인 정보를 지웠어요.")
+
+        RoundButton(btns, "저장", save, kind="primary", height=32, padx=16, size=9).pack(side="right")
+        RoundButton(btns, "취소", win.destroy, height=32, padx=16, size=9).pack(side="right", padx=(0, 6))
+        if saved[0]:
+            RoundButton(btns, "삭제", remove, height=32, padx=16, size=9).pack(side="left")
+        entries[1 if saved[0] else 0].focus_set()
+        win.bind("<Return>", lambda e: save())
+        win.bind("<Escape>", lambda e: win.destroy())
 
     def do_check():
         if busy["v"]:
