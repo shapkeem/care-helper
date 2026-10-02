@@ -218,7 +218,6 @@ def build_page(parent, RoundButton, F, busy, app):
                 done = sum(it.status == "완료" for it in items)
                 head = "멈춤" if state["stop"] else "끝"
                 ui(lambda: status.configure(text=f"{head} · 완료 {done}건 / 전체 {len(items)}건"))
-                close_hidden_chrome(pw)
         except (jev.JevError, g.WorkError, app.NeedLogin) as e:
             msg = str(e)
             ui(lambda: status.configure(text=msg))
@@ -228,23 +227,10 @@ def build_page(parent, RoundButton, F, busy, app):
             ui(lambda: status.configure(text=msg))
             log(msg)
         finally:
-            try:  # 오류로 끝났어도 백그라운드 크롬은 끈다
-                if app.chrome_mode() == "hidden":
-                    app.close_chrome()
-            except Exception:
-                pass
             state["running"] = False
             busy["v"] = False
+            app.schedule_chrome_close()  # 5분 동안 다음 작업이 없으면 백그라운드 크롬을 끈다 (오류로 끝나도)
             ui(lambda: qbox.pack_forget())
-
-    def close_hidden_chrome(pw):
-        """백그라운드 크롬은 작업이 끝나면 끈다 (켜 두면 PC가 느려짐)."""
-        try:
-            if app.chrome_mode() == "hidden":
-                app.close_chrome(pw)
-                log("백그라운드 크롬을 껐어요")
-        except Exception:
-            pass
 
     def start():
         if state["running"]:

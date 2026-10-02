@@ -276,9 +276,43 @@ def auto_login(page, user_id, password):
     return False
 
 
+CHROME_IDLE_SEC = 300  # 백그라운드 크롬을 이만큼 안 쓰면 끈다 (계속 켜 두면 PC가 느려짐)
+_idle = {"timer": None, "busy": lambda: False}
+
+
+def cancel_chrome_close():
+    t = _idle["timer"]
+    if t:
+        t.cancel()
+        _idle["timer"] = None
+
+
+def schedule_chrome_close():
+    """작업이 끝나면 부른다. 5분 동안 다음 작업이 없으면 백그라운드 크롬을 끈다.
+    그 사이에 작업을 하면 크롬 켜기·로그인을 건너뛰어 빨라진다."""
+    cancel_chrome_close()
+
+    def fire():
+        _idle["timer"] = None
+        if _idle["busy"]():
+            schedule_chrome_close()
+            return
+        try:
+            if chrome_mode() == "hidden":
+                close_chrome()
+        except Exception:
+            pass
+
+    t = threading.Timer(CHROME_IDLE_SEC, fire)
+    t.daemon = True
+    t.start()
+    _idle["timer"] = t
+
+
 def get_page(pw, show=False):
     """show=True 면 크롬 창을 보이게 띄운다. 아니면 로그인 정보가 있고 '창 숨기기'가 켜져 있을 때
     창 없이 백그라운드로 띄운다."""
+    cancel_chrome_close()
     creds = load_credentials()
     if show:
         ensure_chrome(hidden=False, pw=pw)
@@ -525,8 +559,6 @@ def run_daily_check(log, progress=lambda pct, msg: None):
             progress(60, "통계(서비스현황 일별) 읽는 중...")
             log("통계(서비스현황 일별) 읽는 중...")
             service_people = collect_service_people(page, log)
-            if chrome_mode() == "hidden":  # 백그라운드 크롬은 켜 두면 PC가 느려지니 다 쓰면 끈다
-                close_chrome(pw)
         progress(90, "명단 대조하는 중...")
         users_df = read_list(users_path)
         absent_df = read_list(absent_path) if has_absent else []
@@ -1134,6 +1166,7 @@ def main_gui():
                 ui(lambda: set_progress(0, msg, True))
             finally:
                 busy["v"] = False
+                schedule_chrome_close()
                 ui(lambda: btn_check.set_enabled(True))
         threading.Thread(target=work, daemon=True).start()
 
@@ -1228,6 +1261,7 @@ def main_gui():
 
     def on_close():
         # 백그라운드 크롬은 눈에 안 보이니 프로그램을 닫을 때 같이 끈다
+        cancel_chrome_close()
         try:
             if chrome_mode() == "hidden":
                 close_chrome()
@@ -1236,6 +1270,7 @@ def main_gui():
         root.destroy()
 
     root.protocol("WM_DELETE_WINDOW", on_close)
+    _idle["busy"] = lambda: busy["v"]
     show_page("daily")
     set_status("check")
     threading.Thread(target=check_update, daemon=True).start()
@@ -1253,5 +1288,8 @@ if __name__ == "__main__":
             print(run_daily_check(print)["report"])
         except NeedLogin as e:
             print(e)
+        finally:
+            if chrome_mode() == "hidden":  # 창 없는 실행은 끝나면 바로 끈다
+                close_chrome()
     else:
         main_gui()

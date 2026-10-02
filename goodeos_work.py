@@ -44,12 +44,35 @@ def is_past(d, end_hhmm, now=None):
     return end <= now
 
 
-def _settle(page, ms=1200):
+def _settle(page, ms=150, timeout=20):
+    """사이트의 ajax(jQuery) 요청이 다 끝날 때까지 기다린다.
+    networkidle 은 구글 분석 통신 때문에 거의 매번 최대 시간까지 기다려서 쓰지 않는다.
+    이어지는 요청(응답 안에서 다음 요청)은 jQuery.active 가 0으로 내려가지 않으므로 두 번 연속 0이면 끝."""
+    end = time.time() + timeout
+    quiet = 0
+    while time.time() < end:
+        try:
+            idle = page.evaluate("() => !window.jQuery || jQuery.active === 0")
+        except Exception:
+            idle = False  # 페이지 이동 중
+        quiet = quiet + 1 if idle else 0
+        if quiet >= 2:
+            break
+        page.wait_for_timeout(100)
+    if ms:
+        page.wait_for_timeout(ms)
+
+
+def _reuse(page, var, key, selector):
+    """같은 화면이 이미 열려 있으면 다시 쓰고 True. (페이지를 옮기면 표시 변수가 사라져서 자동으로 False)"""
     try:
-        page.wait_for_load_state("networkidle", timeout=8000)
+        ok = page.evaluate("(a) => window[a.v] === a.k && !!document.querySelector(a.s)",
+                           {"v": var, "k": key, "s": selector})
+        if ok:
+            page.evaluate("() => $('#DIV_LAYER').parent().show()")
+        return ok
     except Exception:
-        pass
-    page.wait_for_timeout(ms)
+        return False
 
 
 def _norm(n):
@@ -91,23 +114,23 @@ class Dialogs:
 
 # ================================================================ 일정 (지원사별 일정등록)
 def open_plan(page, ic_name, year, month):
-    """지원사 행의 해당 월 [작성] 을 눌러 일정 창을 연다."""
+    """지원사 행의 해당 월 [작성] 을 눌러 일정 창을 연다. 이미 열려 있으면 그대로 쓴다."""
+    key = f"{ic_name}|{year}|{month}"
+    if _reuse(page, "__ch_plan", key, "#DIV_LAYER #TBL_PLAN"):
+        return
     page.goto(PLAN_URL)
     page.wait_for_load_state()
-    _settle(page, 800)
+    _settle(page)
     page.evaluate("""(a)=>{ $('#yymm').val(a.ym); $('#ic_name').val(a.ic); Search(); }""",
                   {"ym": f"{year}-{month:02d}", "ic": ic_name})
-    _settle(page, 1500)
+    _settle(page)
     btn = page.locator(f'#TBL_LIST tr:has(button:text-is("{ic_name}")) button[year="{year}"][month="{month}"]')
     if btn.count() == 0:
         raise WorkError(f"지원사별 일정등록에서 '{ic_name}' 선생님 {year}년 {month}월 칸을 찾지 못했어요.")
     btn.first.click()
     page.wait_for_selector("#DIV_LAYER #TBL_PLAN", timeout=20000)
-    for _ in range(40):  # 일정 데이터(ajax)가 다 그려질 때까지
-        if page.locator('#DIV_LAYER div[nick="ILJUNG"]').count() > 0:
-            break
-        page.wait_for_timeout(250)
-    _settle(page, 800)
+    _settle(page, 300)  # 일정 데이터(ajax)까지 다 그려질 때까지
+    page.evaluate("(k) => { window.__ch_plan = k; window.__ch_rst = null; }", key)
 
 
 def read_plans(page):
@@ -164,7 +187,7 @@ def add_plan(page, dlg, person, d, frm, to, kind):
     if cell.count() == 0:
         raise WorkError(f"일정표에서 {d:%m/%d} 칸을 찾지 못했어요.")
     cell.first.locator(".btn-add").click()
-    page.wait_for_timeout(500)
+    page.wait_for_timeout(200)
     if dlg.since(m):
         raise WorkError("일정 추가 실패: " + " / ".join(dlg.since(m)))
     if len(read_plans(page)) != before + 1:
@@ -179,12 +202,8 @@ def save_plan(page, dlg):
     page.locator('#DIV_LAYER button:text-is("저장")').first.click()
     if not dlg.wait_for(m, "정상적으로 처리되었습니다", timeout=120):
         raise WorkError("일정 저장 결과를 확인하지 못했어요: " + " / ".join(dlg.since(m)))
-    page.wait_for_timeout(800)  # 저장 뒤 LoadIljungData 로 다시 그림
-    for _ in range(40):
-        if page.locator('#DIV_LAYER div[nick="ILJUNG"]').count() > 0:
-            break
-        page.wait_for_timeout(250)
-    _settle(page, 500)
+    page.wait_for_timeout(100)  # 알림 뒤 LoadIljungData 로 다시 그림
+    _settle(page, 300)
 
 
 def delete_plan(page, plan):
@@ -196,10 +215,10 @@ def delete_plan(page, plan):
     if box.count() != 1:
         raise WorkError("지울 일정을 정확히 찾지 못했어요.")
     box.locator("img").first.click()  # X
-    for _ in range(40):
+    for _ in range(100):
         if box.count() == 0:
             return
-        page.wait_for_timeout(250)
+        page.wait_for_timeout(100)
     raise WorkError("일정이 지워지지 않았어요.")
 
 
@@ -212,17 +231,21 @@ def close_layer(page):
 
 # ================================================================ 실적 (실적등록 및 수정)
 def open_result(page, person, ic_name, year, month):
+    """실적 화면을 연다. 같은 대상자·월이 이미 열려 있으면 그대로 쓴다."""
+    key = f"{person}|{ic_name}|{year}|{month}"
+    if _reuse(page, "__ch_rst", key, "#DIV_LAYER #TBL_SVC"):
+        return
     page.goto(RST_URL)
     page.wait_for_load_state()
-    _settle(page, 800)
+    _settle(page)
     page.evaluate("""(a)=>{ $('#yymm').val(a.ym); $('#tgt_name').val(a.p); LoadSw(); }""",
                   {"ym": f"{year}-{month:02d}", "p": person})
-    _settle(page, 2000)
+    _settle(page)
     ic = page.locator("#TBL_IC tbody tr", has_text=ic_name)
     if ic.count() == 0:
         raise WorkError(f"실적등록에서 '{person}' 어르신의 지원사 목록에 '{ic_name}' 선생님이 없어요.")
     ic.first.click()
-    _settle(page, 1500)
+    _settle(page)
     rows = page.locator("#TBL_LIST tbody tr").filter(has_text=person)
     if rows.count() == 0:
         raise WorkError(f"실적등록 목록에 '{person}' 어르신이 없어요.")
@@ -233,7 +256,8 @@ def open_result(page, person, ic_name, year, month):
         raise WorkError(f"'{person}' 어르신 {year}년 {month}월 실적 칸이 없어요.")
     btn.first.click()
     page.wait_for_selector("#DIV_LAYER #TBL_SVC", timeout=20000)
-    _settle(page, 800)
+    _settle(page)
+    page.evaluate("(k) => { window.__ch_rst = k; window.__ch_plan = null; }", key)
 
 
 def _result_row(page, seq, d):
@@ -249,7 +273,7 @@ def register_result(page, dlg, seq, d):
     if row.locator("#from_time").input_value():
         return "already"
     row.locator('button:text-is("복사")').click()
-    page.wait_for_timeout(300)
+    page.wait_for_timeout(100)
     if not row.locator("#from_time").input_value():
         raise WorkError("복사 버튼을 눌렀는데 실적 시간이 채워지지 않았어요.")
     m = dlg.mark()
