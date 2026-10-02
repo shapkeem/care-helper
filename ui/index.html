@@ -1,0 +1,317 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>맞춤돌봄도우미</title>
+<style>
+:root{
+  --page:#ffffff; --surface-1:#f6f6f4; --surface-2:#ffffff;
+  --border:rgba(0,0,0,.09); --border-strong:rgba(0,0,0,.16);
+  --text-primary:#1f1e1c; --text-secondary:#5f5e5a; --text-muted:#8c8b86;
+  --fill-ghost-hover:rgba(0,0,0,.04); --fill-ghost-selected:rgba(0,0,0,.07);
+  --fill-accent:#2563eb; --fill-accent-hover:#1d4ed8; --on-accent:#fff;
+  --bg-accent:#e8f0fe; --text-accent:#1d4ed8;
+  --bg-success:#e6f4ea; --text-success:#1e6b34;
+  --bg-warning:#fdf3d7; --text-warning:#8a5a00; --border-warning:#f3d48a;
+  --bg-danger:#fdecec; --text-danger:#b42318;
+  --radius:8px; --font:"Malgun Gothic","맑은 고딕",system-ui,sans-serif;
+  --mono:Consolas,"D2Coding","Malgun Gothic",monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:var(--page);color:var(--text-primary);font:14px/1.5 var(--font)}
+button{font:inherit;font-size:13px;height:34px;padding:0 14px;border-radius:var(--radius);border:1px solid var(--border-strong);
+  background:var(--surface-2);color:var(--text-primary);cursor:pointer}
+button:hover{background:var(--surface-1)}
+button:active{transform:scale(.98)}
+button.primary{background:var(--fill-accent);border-color:var(--fill-accent);color:var(--on-accent)}
+button.primary:hover{background:var(--fill-accent-hover)}
+button.small{height:28px;padding:0 10px;font-size:12px}
+button:disabled{opacity:.5;cursor:default}
+input[type=text],input[type=password],textarea{font:inherit;font-size:13px;width:100%;border:1px solid var(--border-strong);
+  border-radius:var(--radius);padding:8px 10px;background:var(--surface-2);color:var(--text-primary);outline:none}
+input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px var(--bg-accent)}
+::-webkit-scrollbar{width:8px;height:8px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:var(--border-strong);border-radius:8px;border:2px solid transparent;background-clip:padding-box}
+::-webkit-scrollbar-thumb:hover{background:rgba(0,0,0,.28);background-clip:padding-box}
+
+.app{display:grid;grid-template-columns:200px minmax(0,1fr);height:100vh}
+.side{background:var(--surface-1);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:16px 10px}
+.brand{font-weight:600;font-size:15px;padding:4px 12px 16px}
+.nav{padding:9px 12px;border-radius:var(--radius);color:var(--text-secondary);cursor:pointer;margin-bottom:2px;user-select:none}
+.nav:hover{background:var(--fill-ghost-hover)}
+.nav.on{background:var(--fill-ghost-selected);color:var(--text-primary);font-weight:600}
+.side-bottom{margin-top:auto;border-top:1px solid var(--border);padding-top:8px}
+.pill{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:3px 10px;border-radius:999px;margin:8px 12px 4px;
+  background:var(--fill-ghost-selected);color:var(--text-secondary)}
+.pill.ok{background:var(--bg-success);color:var(--text-success)}
+.pill.login{background:var(--bg-warning);color:var(--text-warning)}
+.pill i{width:7px;height:7px;border-radius:50%;background:currentColor;display:inline-block}
+.ver{font-size:11px;color:var(--text-muted);padding:2px 12px}
+#updateBtn{margin:6px 12px 2px;display:none}
+
+.main{min-width:0;overflow:hidden}
+.page{display:none;height:100vh;padding:22px 28px 18px;flex-direction:column;min-height:0}
+.page.on{display:flex}
+.head{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;margin-bottom:14px}
+.title{font-size:22px;font-weight:600;line-height:1.3}
+.sub{color:var(--text-secondary);font-size:13px}
+.actions{display:flex;gap:6px}
+
+.prog-text{font-size:12px;color:var(--text-secondary);min-height:18px}
+.prog-text.err{color:var(--text-danger)}
+.bar{height:4px;background:var(--surface-1);border-radius:4px;overflow:hidden;margin:4px 0 16px}
+.bar>div{height:100%;width:0;background:var(--fill-accent);transition:width .25s}
+.metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin-bottom:18px}
+.mc{background:var(--surface-1);border-radius:var(--radius);padding:10px 14px}
+.mc .l{font-size:12px;color:var(--text-secondary)}
+.mc .n{font-size:24px;font-weight:600}
+.mc.hot{background:var(--bg-danger)} .mc.hot .l,.mc.hot .n{color:var(--text-danger)}
+.list-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px}
+.list-head b{font-weight:600}
+
+.box{border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;display:flex;flex-direction:column;min-height:0}
+.scroll{overflow-y:auto;min-height:0;flex:1}
+.prow{display:flex;align-items:center;gap:12px;padding:10px 14px;border-bottom:1px solid var(--border)}
+.prow:last-child{border-bottom:none}
+.prow:hover{background:var(--fill-ghost-hover)}
+.prow .nm{font-weight:600;width:72px;flex:none}
+.prow .info{flex:1;color:var(--text-secondary);font-size:13px;min-width:0}
+.lnk{color:var(--text-accent);cursor:pointer;font-size:13px;white-space:nowrap}
+.lnk:hover{text-decoration:underline}
+.lnk.off{color:var(--text-muted);cursor:default;text-decoration:none}
+.badge{font-size:11px;padding:2px 9px;border-radius:999px;white-space:nowrap;justify-self:start;display:inline-block}
+.b-ok{background:var(--bg-success);color:var(--text-success)}
+.b-run{background:var(--bg-accent);color:var(--text-accent)}
+.b-warn{background:var(--bg-warning);color:var(--text-warning)}
+.b-err{background:var(--bg-danger);color:var(--text-danger)}
+.b-idle{background:var(--fill-ghost-selected);color:var(--text-secondary)}
+.empty{padding:40px 14px;text-align:center;color:var(--text-muted)}
+.empty.good{color:var(--text-success)}
+
+#kText{height:110px;resize:vertical}
+.kstatus{font-size:12px;color:var(--text-secondary);margin:8px 0;min-height:18px}
+.q{background:var(--bg-warning);border:1px solid var(--border-warning);border-radius:var(--radius);padding:12px 14px;margin-bottom:10px;display:none}
+.q.on{display:block}
+.q .qt{color:var(--text-warning);font-weight:600;white-space:pre-wrap;margin-bottom:8px}
+.q .opts{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.q .opts button{height:auto;min-height:30px;padding:4px 10px;text-align:left;background:var(--surface-2)}
+.q .row{display:flex;gap:6px}
+.q .row input{flex:1}
+.thead,.trow{display:grid;grid-template-columns:minmax(0,1fr) 84px minmax(0,.7fr);gap:10px;padding:9px 14px;align-items:center}
+.thead{font-size:12px;color:var(--text-secondary);background:var(--surface-1);border-bottom:1px solid var(--border)}
+.trow{border-bottom:1px solid var(--border);font-size:13px}
+.trow:last-child{border-bottom:none}
+.trow:hover{background:var(--fill-ghost-hover)}
+.trow .note{color:var(--text-secondary);font-size:12px}
+.logs{background:var(--surface-1);border-radius:var(--radius);padding:10px 14px;font:12px/1.7 var(--mono);color:var(--text-secondary);
+  height:130px;overflow-y:auto;margin-top:10px;white-space:pre-wrap;flex:none}
+
+.form{max-width:380px;display:grid;gap:14px}
+.form label{display:grid;gap:4px;font-size:12px;color:var(--text-secondary)}
+.check{display:flex !important;align-items:center;gap:8px;font-size:13px !important;color:var(--text-primary) !important}
+.hint{font-size:12px;color:var(--text-muted)}
+.smsg{font-size:13px;color:var(--text-secondary);min-height:20px;margin-top:12px}
+.smsg.err{color:var(--text-danger)}
+.toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--text-primary);color:#fff;padding:8px 16px;
+  border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
+.toast.on{opacity:.92}
+</style>
+</head>
+<body>
+<div class="app">
+  <aside class="side">
+    <div class="brand">맞춤돌봄도우미</div>
+    <div class="nav on" data-p="daily">일일실적 점검</div>
+    <div class="nav" data-p="kakao">카톡 요청 처리</div>
+    <div class="side-bottom">
+      <div class="nav" data-p="settings">설정</div>
+      <div><span class="pill" id="pill"><i></i><span id="pillText">상태 확인 중...</span></span></div>
+      <button class="small primary" id="updateBtn">업데이트</button>
+      <div class="ver" id="ver"></div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <!-- 일일실적 점검 -->
+    <section class="page on" id="p-daily">
+      <div class="head">
+        <div><div class="title">일일실적 점검</div><div class="sub" id="today"></div></div>
+        <button class="primary" id="checkBtn">점검 시작</button>
+      </div>
+      <div class="prog-text" id="progText">준비됐어요. 점검 시작을 눌러 주세요.</div>
+      <div class="bar"><div id="progBar"></div></div>
+      <div class="metrics">
+        <div class="mc"><div class="l">이용자</div><div class="n" id="mUsers">-</div></div>
+        <div class="mc"><div class="l">장기부재</div><div class="n" id="mAbsent">-</div></div>
+        <div class="mc" id="mcMissing"><div class="l">실적 미입력</div><div class="n" id="mMissing">-</div></div>
+        <div class="mc"><div class="l">장기부재 실적</div><div class="n" id="mAbsentReg">-</div></div>
+      </div>
+      <div class="list-head"><b id="listTitle">실적 확인이 필요한 사람</b><button class="small" id="copyAllBtn">전체 복사</button></div>
+      <div class="box" style="flex:1"><div class="scroll" id="plist"><div class="empty">점검을 시작하면 여기에 결과가 나와요.</div></div></div>
+    </section>
+
+    <!-- 카톡 요청 처리 -->
+    <section class="page" id="p-kakao">
+      <div class="head">
+        <div><div class="title">카톡 요청 처리</div><div class="sub">생활지원사 카톡을 붙여넣으면 알아서 처리해요. 애매한 건 물어볼게요.</div></div>
+        <div class="actions"><button id="kStop">멈춤</button><button class="primary" id="kStart">처리 시작</button></div>
+      </div>
+      <textarea id="kText" placeholder="[이미화생지사1동] [오후 2:01] 장귀현 어르신 방문 실행 부탁드립니다"></textarea>
+      <div class="kstatus" id="kStatus"></div>
+      <div class="q" id="q">
+        <div class="qt" id="qText"></div>
+        <div class="opts" id="qOpts"></div>
+        <div class="row"><input type="text" id="qInput" placeholder="자유롭게 답해도 돼요"><button class="primary" id="qSend">답하기</button><button id="qSkip">건너뛰기</button></div>
+      </div>
+      <div class="box" style="flex:1">
+        <div class="thead"><span>요청</span><span>상태</span><span>메모</span></div>
+        <div class="scroll" id="ktable"><div class="empty">처리할 요청이 여기에 나와요.</div></div>
+      </div>
+      <div class="logs" id="klog"></div>
+    </section>
+
+    <!-- 설정 -->
+    <section class="page" id="p-settings">
+      <div class="head"><div><div class="title">설정</div><div class="sub">이 PC의 윈도우 계정에만 암호화해서 저장돼요.</div></div></div>
+      <div class="form">
+        <label>goodeos 아이디<input type="text" id="sId" autocomplete="off"></label>
+        <label>goodeos 비밀번호<input type="password" id="sPw" autocomplete="off"></label>
+        <label>Jev API 키 (카톡 요청 처리용)<input type="password" id="sJev" autocomplete="off"></label>
+        <div class="hint" id="jevHint"></div>
+        <label class="check"><input type="checkbox" id="sHide">점검할 때 크롬 창 숨기기 (백그라운드에서 실행)</label>
+        <div class="actions"><button class="primary" id="sSave">저장</button><button id="sChrome">크롬 창 열기</button><button id="sDel">로그인 정보 지우기</button></div>
+      </div>
+      <div class="smsg" id="sMsg"></div>
+    </section>
+  </main>
+</div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+let api = null, PW_MASK = "••••••••";
+
+function toast(t){ const el=$("toast"); el.textContent=t; el.classList.add("on"); clearTimeout(toast.t); toast.t=setTimeout(()=>el.classList.remove("on"),1800); }
+function show(p){
+  document.querySelectorAll(".nav").forEach(n=>n.classList.toggle("on", n.dataset.p===p));
+  document.querySelectorAll(".page").forEach(s=>s.classList.toggle("on", s.id==="p-"+p));
+}
+document.querySelectorAll(".nav").forEach(n=>n.onclick=()=>show(n.dataset.p));
+
+const BADGE = {"완료":"b-ok","실적 넣음":"b-ok","처리 중":"b-run","대기":"b-idle","사람 처리":"b-warn","건너뜀":"b-idle",
+               "멈춤":"b-idle","확인 필요":"b-err","오류":"b-err"};
+
+// ---- 일일실적 점검
+function setProg(p, msg, err){ if(p!=null) $("progBar").style.width=p+"%"; $("progText").textContent=msg; $("progText").classList.toggle("err",!!err); }
+function personRow(r){
+  const tag = r.kind==="missing" ? '<span class="badge b-err" id="tag'+r.idx+'">미입력</span>'
+                                 : '<span class="badge b-err">장기부재 실적</span>';
+  const fill = r.kind==="missing" ? '<span class="lnk" id="fill'+r.idx+'" onclick="fill('+r.idx+')">실적 넣기</span>' : '';
+  return '<div class="prow"><span class="nm">'+esc(r.name)+'</span><span class="info">담당 '+esc(r.ic)+' · '+esc(r.phone)+'</span>'
+       + tag + fill + '<span class="lnk" onclick="copyPerson('+r.idx+')">복사</span></div>';
+}
+$("checkBtn").onclick = async () => {
+  const err = await api.check();
+  if(err){ setProg(null, err, true); return; }
+  $("checkBtn").disabled = true; setProg(2, "점검을 시작해요...");
+};
+$("copyAllBtn").onclick = async () => toast(await api.copy_all());
+async function copyPerson(i){ toast(await api.copy_person(i)); }
+async function fill(i){
+  const el=$("fill"+i); if(el.classList.contains("off")) return;
+  const err = await api.fill(i);
+  if(err){ toast(err); return; }
+  el.textContent="처리 중..."; el.classList.add("off");
+}
+
+// ---- 카톡 요청 처리
+const rows = {};
+function kRow(r){
+  let el = rows[r.id];
+  if(!el){ if(!Object.keys(rows).length) $("ktable").innerHTML=""; el=document.createElement("div"); el.className="trow"; $("ktable").appendChild(el); rows[r.id]=el; }
+  el.innerHTML = '<span>'+esc(r.label)+'</span><span><span class="badge '+(BADGE[r.status]||"b-idle")+'">'+esc(r.status)+'</span></span><span class="note">'+esc(r.note)+'</span>';
+  el.scrollIntoView({block:"nearest"});
+}
+$("kStart").onclick = async () => {
+  const err = await api.kakao_start($("kText").value);
+  if(err){ $("kStatus").textContent = err; return; }
+  for(const k in rows) delete rows[k];
+  $("ktable").innerHTML = '<div class="empty">요청을 읽는 중이에요...</div>';
+};
+$("kStop").onclick = () => api.kakao_stop();
+function answer(v){ $("qInput").value=""; $("q").classList.remove("on"); api.kakao_answer(v); }
+$("qSend").onclick = () => { const v=$("qInput").value.trim(); if(v) answer(v); };
+$("qInput").onkeydown = e => { if(e.key==="Enter"){ const v=e.target.value.trim(); if(v) answer(v); } };
+$("qSkip").onclick = () => answer(null);
+
+// ---- 설정
+$("sSave").onclick = async () => {
+  // 가려진 채 그대로면 null → 저장돼 있던 값을 그대로 쓴다
+  const pw = $("sPw").value===PW_MASK ? null : $("sPw").value;
+  const jv = $("sJev").value===PW_MASK ? null : $("sJev").value;
+  const r = await api.save_settings($("sId").value, pw, jv, $("sHide").checked);
+  $("sMsg").textContent=r.msg; $("sMsg").classList.toggle("err", !r.ok);
+};
+$("sChrome").onclick = async () => { const e = await api.open_chrome(); $("sMsg").textContent = e || "크롬 창을 여는 중..."; $("sMsg").classList.remove("err"); };
+$("sDel").onclick = async () => { $("sMsg").textContent = await api.delete_login(); $("sId").value=""; $("sPw").value=""; };
+$("updateBtn").onclick = async () => {
+  if(!confirm("새 버전으로 업데이트할까요? 끝나면 프로그램이 다시 켜져요.")) return;
+  const e = await api.do_update(); if(e) toast(e); else { $("updateBtn").textContent="업데이트 중..."; $("updateBtn").disabled=true; }
+};
+
+// ---- 파이썬에서 오는 알림
+window.App = { on(ev, d){
+  switch(ev){
+    case "progress": setProg(d.pct, d.msg); break;
+    case "check_done": {
+      $("checkBtn").disabled=false; setProg(100, "완료 · 통계 "+d.stats+"건 읽음");
+      $("mUsers").textContent=d.users; $("mAbsent").textContent=d.absent; $("mMissing").textContent=d.missing; $("mAbsentReg").textContent=d.absentReg;
+      $("mcMissing").classList.toggle("hot", d.missing>0);
+      $("listTitle").textContent = "실적 확인이 필요한 사람 ("+d.rows.length+"명)";
+      $("plist").innerHTML = d.rows.length ? d.rows.map(personRow).join("") :
+        '<div class="empty good">모든 이용자에게 실적이 들어가 있고, 장기부재자 실적도 없어요.</div>';
+      refreshStatus(); break; }
+    case "check_error": $("checkBtn").disabled=false; setProg(0, d, true); break;
+    case "fill_done": {
+      const el=$("fill"+d.idx);
+      if(d.ok){ const t=$("tag"+d.idx); t.textContent="실적 넣음"; t.className="badge b-ok"; el.remove(); toast(d.msg); }
+      else { el.textContent="다시 시도"; el.classList.remove("off"); setProg(null, d.msg, true); }
+      break; }
+    case "k_status": $("kStatus").textContent=d; break;
+    case "k_row": kRow(d); break;
+    case "k_log": { const l=$("klog"); l.textContent += (l.textContent?"\n":"")+d; l.scrollTop=l.scrollHeight; break; }
+    case "k_question":
+      if(!d){ $("q").classList.remove("on"); break; }
+      $("qText").textContent=d.question;
+      $("qOpts").innerHTML="";
+      d.options.slice(0,12).forEach(o=>{ const b=document.createElement("button"); b.textContent = o.desc && o.desc!==o.key ? o.key+" · "+o.desc : o.key; b.onclick=()=>answer(o.key); $("qOpts").appendChild(b); });
+      $("q").classList.add("on"); $("qInput").focus(); break;
+    case "settings_msg": $("sMsg").textContent=d.msg; $("sMsg").classList.toggle("err", !d.ok); refreshStatus(); break;
+    case "update": $("updateBtn").style.display="block"; $("updateBtn").textContent="v"+d.version+" 업데이트"; break;
+    case "update_progress": $("updateBtn").textContent="업데이트 중... "+d+"%"; break;
+    case "update_failed": $("updateBtn").disabled=false; $("updateBtn").textContent="업데이트"; toast(d); break;
+    case "update_relocated": alert("지금 폴더에는 파일을 바꿀 권한이 없어서, 관리자 권한 없이 쓸 수 있는 곳에 새 버전을 설치했어요.\n앞으로는 바탕화면의 '맞춤돌봄도우미' 바로가기로 실행해 주세요."); break;
+  }
+}};
+
+async function refreshStatus(){
+  const s = await api.status(); if(!s) return;
+  $("pill").className = "pill " + (s.kind.startsWith("ok") ? "ok" : s.kind==="login" ? "login" : "");
+  $("pillText").textContent = ({ok:"로그인됨", ok_hidden:"로그인됨 · 백그라운드", login:"로그인 필요", off:"크롬 꺼짐"})[s.kind] || s.text;
+}
+
+window.addEventListener("pywebviewready", async () => {
+  api = window.pywebview.api;
+  const s = await api.init();
+  $("ver").textContent = "v"+s.version; $("today").textContent = s.today+" · 오늘 실적 기준";
+  $("sId").value = s.userId; $("sPw").value = s.hasPw ? PW_MASK : ""; $("sHide").checked = s.hideChrome;
+  if(s.jevEnv){ $("jevHint").textContent="Jev API 키는 이 PC 환경변수(TYPESAFE_API_KEY)에 있는 걸 쓰고 있어요."; }
+  else if(s.hasJev){ $("sJev").value = PW_MASK; }
+  refreshStatus(); setInterval(refreshStatus, 8000);
+});
+</script>
+</body>
+</html>

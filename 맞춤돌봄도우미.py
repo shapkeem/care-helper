@@ -276,11 +276,60 @@ def auto_login(page, user_id, password):
     return False
 
 
-HISTORY = []  # 프로그램을 켠 동안의 처리 기록 (화면에만 보이고 파일로 저장하지 않음)
+# ---------------------------------------------------------------- 화면 공용 동작 (웹 화면·기본 화면이 같이 씀)
+def save_all_settings(user_id, password, jev_key, hide_chrome):
+    """→ (성공 여부, 화면에 보일 문구)"""
+    user_id = (user_id or "").strip()
+    if not user_id or not password:
+        return False, "아이디와 비밀번호를 모두 입력해 주세요."
+    try:
+        save_credentials(user_id, password)
+        save_settings(hide_chrome=bool(hide_chrome))
+        if (jev_key or "").strip() or not os.environ.get("TYPESAFE_API_KEY"):
+            save_jev_key((jev_key or "").strip())
+    except Exception as e:
+        return False, f"저장하지 못했어요: {e}"
+    return True, "저장했어요. 이제 점검 시작만 누르면 자동으로 로그인해요."
 
 
-def add_history(msg):
-    HISTORY.append(f"{datetime.now():%H:%M:%S} {msg}")
+def open_chrome_window():
+    """'크롬 창 열기': 보이는 크롬을 띄우고 (로그인 정보가 있으면) 로그인까지. → (성공 여부, 문구)"""
+    try:
+        if load_credentials():
+            from playwright.sync_api import sync_playwright
+            with sync_playwright() as pw:
+                get_page(pw, show=True)
+            return True, "크롬 창을 열고 로그인했어요."
+        if chrome_mode() == "hidden":
+            close_chrome()
+        opened = open_chrome()
+        return True, ("자동화용 크롬을 열었어요. 로그인한 뒤 점검 시작을 눌러 주세요." if opened
+                      else "자동화용 크롬이 이미 열려 있어요.")
+    except Exception as e:
+        return False, str(e)
+
+
+def fill_result(ic, name, day):
+    """일일실적 점검의 [실적 넣기]: 그날 실적 없는 지난 일정에 실적을 넣는다. → (성공 여부, 문구)"""
+    import goodeos_work as g
+    import kakao
+    import runner
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as pw:
+            page = get_page(pw)
+            dlg = g.Dialogs(page)
+            offset = g.server_offset(page)
+            it = kakao.Item(ic=ic, person=name, date=day, action="실적", source="일일실적 점검")
+            runner.run_item(page, dlg, it, lambda q, o: None, lambda m: None, now=datetime.now() + offset)
+        return True, f"{name} 어르신 실적을 넣었어요."
+    except Exception as e:
+        msg = str(e)
+        if msg == "건너뜀":
+            msg = "실적 없는 일정이 여러 개라 고를 수 없어요. 카톡 요청 처리에서 해 주세요."
+        return False, msg
+    finally:
+        schedule_chrome_close()
 
 
 CHROME_IDLE_SEC = 300  # 백그라운드 크롬을 이만큼 안 쓰면 끈다 (계속 켜 두면 PC가 느려짐)
@@ -895,7 +944,6 @@ def main_gui():
 
     nav_item(side, "daily", "일일실적 점검")
     nav_item(side, "kakao", "카톡 요청 처리")
-    nav_item(side, "history", "처리 기록")
     side_bottom = tk.Frame(side, bg=C_SIDE)
     side_bottom.pack(side="bottom", fill="x", pady=(0, 14))
     tk.Frame(side_bottom, bg=C_LINE, height=1).pack(fill="x", pady=(0, 8))
@@ -1027,19 +1075,9 @@ def main_gui():
         settings_msg["label"] = msg
 
         def save():
-            uid, pwd = fields["id"].get().strip(), fields["pw"].get()
-            if not uid or not pwd:
-                msg.configure(text="아이디와 비밀번호를 모두 입력해 주세요.", fg=C_DANGER)
-                return
-            try:
-                save_credentials(uid, pwd)
-                save_settings(hide_chrome=bool(hide_var.get()))
-                if fields["jev"].get().strip() or not os.environ.get("TYPESAFE_API_KEY"):
-                    save_jev_key(fields["jev"].get().strip())
-            except Exception as e:
-                msg.configure(text=f"저장하지 못했어요: {e}", fg=C_DANGER)
-                return
-            msg.configure(text="저장했어요. 이제 점검 시작만 누르면 자동으로 로그인해요.", fg=C_MUTED)
+            ok, text = save_all_settings(fields["id"].get(), fields["pw"].get(), fields["jev"].get(),
+                                         bool(hide_var.get()))
+            msg.configure(text=text, fg=C_MUTED if ok else C_DANGER)
 
         def remove():
             delete_credentials()
@@ -1064,24 +1102,7 @@ def main_gui():
         import kakao_ui
         return kakao_ui.build_page(content, RoundButton, F, busy, sys.modules[__name__])
 
-    def build_history():
-        page = tk.Frame(content, bg=C_BG)
-        tk.Label(page, text="처리 기록", font=F(17, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
-        tk.Label(page, text="프로그램을 켠 동안 처리한 내용이에요. 파일로 남기지 않아서 프로그램을 끄면 사라져요.",
-                 font=F(10), bg=C_BG, fg=C_MUTED).pack(anchor="w", pady=(0, 12))
-        box = tk.Text(page, font=F(10), relief="solid", bd=1, bg=C_BG, wrap="word", state="disabled")
-        box.pack(fill="both", expand=True)
-
-        def refresh():
-            box.configure(state="normal")
-            box.delete("1.0", "end")
-            box.insert("end", "\n".join(HISTORY) if HISTORY else "아직 처리한 게 없어요.")
-            box.see("end")
-            box.configure(state="disabled")
-        page.refresh = refresh
-        return page
-
-    PAGE_BUILDERS = {"settings": build_settings, "kakao": build_kakao, "history": build_history}
+    PAGE_BUILDERS = {"settings": build_settings, "kakao": build_kakao}
 
     # ================= 동작 =================
     def ui(fn):
@@ -1146,29 +1167,10 @@ def main_gui():
         name, ic, day = r["성명"], r["생활지원사"], state["day"]
 
         def work():
-            import goodeos_work as g
-            import kakao
-            import runner
-            from playwright.sync_api import sync_playwright
-            ok, msg = False, ""
             try:
-                with sync_playwright() as pw:
-                    page = get_page(pw)
-                    dlg = g.Dialogs(page)
-                    offset = g.server_offset(page)
-                    it = kakao.Item(ic=ic, person=name, date=day, action="실적", source="일일실적 점검")
-                    add_history(f"▶ [{ic}] {name} {day:%m/%d} 실적 넣기 (일일실적 점검)")
-                    runner.run_item(page, dlg, it, lambda q, o: None, add_history,
-                                    now=datetime.now() + offset)
-                    ok = True
-            except Exception as e:
-                msg = str(e)
-                if msg == "건너뜀":
-                    msg = "실적 없는 일정이 여러 개라 고를 수 없어요. 카톡 요청 처리에서 해 주세요."
-                add_history(f"  확인 필요: {name} {msg}")
+                ok, msg = fill_result(ic, name, day)
             finally:
                 busy["v"] = False
-                schedule_chrome_close()
 
             def done():
                 if ok:
@@ -1197,38 +1199,21 @@ def main_gui():
         canvas.yview_moveto(0)
 
     def do_open():
-        if load_credentials():
-            if busy["v"]:
-                return
-            busy["v"] = True
-            btn_check.set_enabled(False)
-            settings_note("크롬 창을 열고 자동으로 로그인하는 중...")
+        if busy["v"]:
+            return
+        busy["v"] = True
+        btn_check.set_enabled(False)
+        settings_note("크롬 창을 여는 중...")
 
-            def work():
-                from playwright.sync_api import sync_playwright
-                try:
-                    with sync_playwright() as pw:
-                        get_page(pw, show=True)
-                    ui(lambda: settings_note("크롬 창을 열고 로그인했어요."))
-                except Exception as e:
-                    msg = str(e)
-                    ui(lambda: settings_note(msg, True))
-                finally:
-                    busy["v"] = False
-                    ui(lambda: btn_check.set_enabled(True))
-                    ui(refresh_status)
-            threading.Thread(target=work, daemon=True).start()
-            return
-        try:
-            if chrome_mode() == "hidden":
-                close_chrome()
-            opened = open_chrome()
-        except Exception as e:
-            settings_note(str(e), True)
-            return
-        settings_note("자동화용 크롬을 열었어요. 로그인한 뒤 점검 시작을 눌러 주세요." if opened
-                     else "자동화용 크롬이 이미 열려 있어요.")
-        refresh_status()
+        def work():
+            try:
+                ok, msg = open_chrome_window()
+                ui(lambda: settings_note(msg, not ok))
+            finally:
+                busy["v"] = False
+                ui(lambda: btn_check.set_enabled(True))
+                ui(refresh_status)
+        threading.Thread(target=work, daemon=True).start()
 
     def do_check():
         if busy["v"]:
@@ -1378,4 +1363,12 @@ if __name__ == "__main__":
             if chrome_mode() == "hidden":  # 창 없는 실행은 끝나면 바로 끈다
                 close_chrome()
     else:
-        main_gui()
+        started = False
+        if "--classic" not in sys.argv:  # 웹 화면(WebView2)을 쓸 수 없으면 기본 화면으로
+            try:
+                import webui
+                started = webui.start(sys.modules[__name__])
+            except Exception:
+                started = False
+        if not started:
+            main_gui()
