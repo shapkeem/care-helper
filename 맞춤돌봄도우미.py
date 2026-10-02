@@ -276,6 +276,13 @@ def auto_login(page, user_id, password):
     return False
 
 
+HISTORY = []  # 프로그램을 켠 동안의 처리 기록 (화면에만 보이고 파일로 저장하지 않음)
+
+
+def add_history(msg):
+    HISTORY.append(f"{datetime.now():%H:%M:%S} {msg}")
+
+
 CHROME_IDLE_SEC = 300  # 백그라운드 크롬을 이만큼 안 쓰면 끈다 (계속 켜 두면 PC가 느려짐)
 _idle = {"timer": None, "busy": lambda: False}
 
@@ -574,7 +581,7 @@ def run_daily_check(log, progress=lambda pct, msg: None):
     total = sum(len(v) for v in service_people.values())
     progress(100, f"완료 · 통계 {total}건 대조")
     return {"report": report, "missing": missing, "absent_reg": absent_reg,
-            "n_users": len(users_df), "n_absent": len(absent_df), "n_stats": total}
+            "n_users": len(users_df), "n_absent": len(absent_df), "n_stats": total, "day": day}
 
 
 # ---------------------------------------------------------------- 업데이트 (GitHub 릴리스)
@@ -851,10 +858,14 @@ def main_gui():
     except Exception:
         pass
     cleanup_old_update_files()
+    try:  # 예전 버전이 남긴 처리 기록 파일 (이제 파일로 남기지 않음)
+        os.remove(os.path.join(APP_DATA_DIR, "처리기록.log"))
+    except OSError:
+        pass
 
     busy = {"v": False, "poll": False}
     upd = {"info": None, "btn": None, "on": False, "running": False}
-    state = {"missing": [], "absent": [], "report": ""}
+    state = {"missing": [], "absent": [], "report": "", "day": date.today()}
 
     def F(size, bold=False):
         return tkfont.Font(family=FONT, size=size, weight="bold" if bold else "normal")
@@ -884,11 +895,12 @@ def main_gui():
 
     nav_item(side, "daily", "일일실적 점검")
     nav_item(side, "kakao", "카톡 요청 처리")
+    nav_item(side, "history", "처리 기록")
     side_bottom = tk.Frame(side, bg=C_SIDE)
     side_bottom.pack(side="bottom", fill="x", pady=(0, 14))
     tk.Frame(side_bottom, bg=C_LINE, height=1).pack(fill="x", pady=(0, 8))
     nav_item(side_bottom, "settings", "설정")
-    pill = tk.Label(side_bottom, font=F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=170)
+    pill = tk.Label(side_bottom, font=F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=140)
     pill.pack(anchor="w", padx=22, pady=(8, 4))
     head_right = tk.Frame(side_bottom, bg=C_SIDE)  # 업데이트 버튼 자리
     head_right.pack(anchor="w", padx=22)
@@ -906,6 +918,9 @@ def main_gui():
                 p.pack_forget()
         pages[key].pack(fill="both", expand=True, padx=26, pady=(20, 12))
         cur["page"] = key
+        refresh = getattr(pages[key], "refresh", None)
+        if refresh:
+            refresh()
 
     # ================= 일일실적 점검 =================
     outer = tk.Frame(content, bg=C_BG)
@@ -1049,7 +1064,24 @@ def main_gui():
         import kakao_ui
         return kakao_ui.build_page(content, RoundButton, F, busy, sys.modules[__name__])
 
-    PAGE_BUILDERS = {"settings": build_settings, "kakao": build_kakao}
+    def build_history():
+        page = tk.Frame(content, bg=C_BG)
+        tk.Label(page, text="처리 기록", font=F(17, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
+        tk.Label(page, text="프로그램을 켠 동안 처리한 내용이에요. 파일로 남기지 않아서 프로그램을 끄면 사라져요.",
+                 font=F(10), bg=C_BG, fg=C_MUTED).pack(anchor="w", pady=(0, 12))
+        box = tk.Text(page, font=F(10), relief="solid", bd=1, bg=C_BG, wrap="word", state="disabled")
+        box.pack(fill="both", expand=True)
+
+        def refresh():
+            box.configure(state="normal")
+            box.delete("1.0", "end")
+            box.insert("end", "\n".join(HISTORY) if HISTORY else "아직 처리한 게 없어요.")
+            box.see("end")
+            box.configure(state="disabled")
+        page.refresh = refresh
+        return page
+
+    PAGE_BUILDERS = {"settings": build_settings, "kakao": build_kakao, "history": build_history}
 
     # ================= 동작 =================
     def ui(fn):
@@ -1093,13 +1125,65 @@ def main_gui():
         tk.Label(line, text=f"담당 {r['생활지원사']} · {phone}", font=F(9), bg=C_BG, fg=C_MUTED,
                  anchor="w").pack(side="left", fill="x", expand=True)
         tag_text = "미입력" if kind == "missing" else "장기부재 실적"
-        tk.Label(line, text=tag_text, font=F(8), bg=C_DANGER_BG, fg=C_DANGER, padx=8, pady=1).pack(side="left", padx=8)
+        tag = tk.Label(line, text=tag_text, font=F(8), bg=C_DANGER_BG, fg=C_DANGER, padx=8, pady=1)
+        tag.pack(side="left", padx=8)
+        if kind == "missing":
+            act = tk.Label(line, text="실적 넣기", font=F(9), bg=C_BG, fg=C_PRIMARY, cursor="hand2")
+            act.pack(side="left", padx=(0, 10))
+            act.bind("<Button-1>", lambda e: do_fill_result(r, act, tag))
         cp = tk.Label(line, text="복사", font=F(9), bg=C_BG, fg=C_PRIMARY, cursor="hand2")
         cp.pack(side="left")
         cp.bind("<Button-1>", lambda e: copy_text("\n".join(person_block(r, kind)), f"{r['성명']} 님 내용을 복사했어요."))
 
+    def do_fill_result(r, act, tag):
+        """점검 결과의 실적 미입력 어르신: 그날 실적 없는 지난 일정에 실적을 넣는다 (카톡 '실적' 요청과 같은 처리)."""
+        if busy["v"]:
+            set_progress(prog["value"], "다른 작업이 진행 중이에요. 끝난 뒤에 눌러 주세요.", True)
+            return
+        busy["v"] = True
+        act.configure(text="처리 중...", cursor="arrow")
+        act.unbind("<Button-1>")
+        name, ic, day = r["성명"], r["생활지원사"], state["day"]
+
+        def work():
+            import goodeos_work as g
+            import kakao
+            import runner
+            from playwright.sync_api import sync_playwright
+            ok, msg = False, ""
+            try:
+                with sync_playwright() as pw:
+                    page = get_page(pw)
+                    dlg = g.Dialogs(page)
+                    offset = g.server_offset(page)
+                    it = kakao.Item(ic=ic, person=name, date=day, action="실적", source="일일실적 점검")
+                    add_history(f"▶ [{ic}] {name} {day:%m/%d} 실적 넣기 (일일실적 점검)")
+                    runner.run_item(page, dlg, it, lambda q, o: None, add_history,
+                                    now=datetime.now() + offset)
+                    ok = True
+            except Exception as e:
+                msg = str(e)
+                if msg == "건너뜀":
+                    msg = "실적 없는 일정이 여러 개라 고를 수 없어요. 카톡 요청 처리에서 해 주세요."
+                add_history(f"  확인 필요: {name} {msg}")
+            finally:
+                busy["v"] = False
+                schedule_chrome_close()
+
+            def done():
+                if ok:
+                    tag.configure(text="실적 넣음", bg="#DCFCE7", fg="#166534")
+                    act.configure(text="")
+                    set_progress(prog["value"], f"{name} 어르신 실적을 넣었어요.")
+                else:
+                    act.configure(text="다시 시도", cursor="hand2")
+                    act.bind("<Button-1>", lambda e: do_fill_result(r, act, tag))
+                    set_progress(prog["value"], f"{name}: {msg}", True)
+            ui(done)
+        threading.Thread(target=work, daemon=True).start()
+
     def show_results(data):
-        state.update(missing=data["missing"], absent=data["absent_reg"], report=data["report"])
+        state.update(missing=data["missing"], absent=data["absent_reg"], report=data["report"], day=data["day"])
         fill_metrics(data)
         for w in inner.winfo_children():
             w.destroy()

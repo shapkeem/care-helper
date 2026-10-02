@@ -120,19 +120,13 @@ def build_page(parent, RoundButton, F, busy, app):
     tree.pack(fill="both", expand=True)
     logbox = tk.Text(outer, height=7, font=F(9), relief="solid", bd=1, bg=C_CARD, state="disabled")
     logbox.pack(fill="x", pady=(8, 0))
-    log_path = os.path.join(app.APP_DATA_DIR, "처리기록.log")
 
     def ui(fn):
         win.after(0, fn)
 
     def log(msg):
         line = f"{datetime.now():%H:%M:%S} {msg}"
-        try:
-            os.makedirs(app.APP_DATA_DIR, exist_ok=True)
-            with open(log_path, "a", encoding="utf-8") as f:
-                f.write(f"{datetime.now():%Y-%m-%d} {line}\n")
-        except OSError:
-            pass
+        app.add_history(msg)  # 화면의 '처리 기록'에만 남김 (파일로 저장하지 않음)
 
         def put():
             logbox.configure(state="normal")
