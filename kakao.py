@@ -15,7 +15,27 @@ CONF_OK = 0.7  # 이보다 확신이 낮으면 사람에게 묻는다
 KINDS = {  # 카톡 낱말 → 서비스 (goodeos_work.SERVICES 키)
     "전화": "전화", "방문": "방문", "인지": "인지", "청소": "청소", "외출": "외출",
 }
-EXCLUDED = ["병원동행", "식사", "반찬", "자원연계", "생활용품", "식료품", "사탕", "교육", "회의", "단체", "건강"]
+EXCLUDED = ["병원동행", "식사", "반찬", "자원연계", "생활용품", "식료품", "사탕", "교육", "회의", "단체", "건강",
+            "기관업무"]
+CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": "청소", "41101": "외출"}
+
+# 요청 낱말 → 요청 종류. 그 줄 뒤에 처음 나오는 낱말로 정한다 (앞의 것이 먼저 맞으면 뒤의 것은 보지 않음)
+ACTION_WORDS = [
+    (r"실적\s*(시간)?\s*입력", "실적"), (r"수정\s*실적", "수정"), (r"입력\s*(및|\.|,)?\s*(실적|실행)", "일정등록"),
+    (r"삭제|취소|빼\s*주|지워", "삭제"), (r"수정|변경|조정|바꿔", "수정"),
+    (r"실적|실행", "실적"), (r"입력|넣어|빠져|추가", "일정등록"),
+]
+
+
+def find_action_words(text):
+    """→ [(위치, 요청 종류)] 겹치는 낱말은 앞 규칙 우선"""
+    out, used = [], []
+    for rx, act in ACTION_WORDS:
+        for m in re.finditer(rx, text):
+            if not any(s <= m.start() < e for s, e in used):
+                out.append((m.start(), act))
+                used.append((m.start(), m.end()))
+    return sorted(out)
 STATUS_BLOCK = {"종결", "장기부재", "타기관이전"}
 
 ACTIONS = {
@@ -155,6 +175,12 @@ def find_dates(text, msg_date):
         d = resolve_day(None, int(m.group(1)), msg_date)
         if d:
             out.append((m.start(), d))
+    for m in re.finditer(r"(?<![\d월/:~\-])(\d{1,2})\s*[,.]?\s*\(?[월화수목금토일]\)?\s*요일", text):  # '13,금요일'
+        if any(abs(p - m.start()) < 8 for p, _ in out):
+            continue
+        d = resolve_day(None, int(m.group(1)), msg_date)
+        if d:
+            out.append((m.start(), d))
     for word, delta in (("그저께", -2), ("어제", -1), ("오늘", 0), ("내일", 1), ("낼", 1)):
         for m in re.finditer(word, text):
             out.append((m.start(), msg_date + timedelta(days=delta)))
@@ -171,6 +197,8 @@ def find_kinds(text):
         for m in re.finditer(w, text):
             if not any(p <= m.start() < p + len(x) for p, x in out if x.startswith("!")):
                 out.append((m.start(), k))
+    for m in re.finditer(r"(?<![\dA-Za-z])(\d{5}|1A102)(?![\dA-Za-z])", text):  # 서비스 코드로 적은 경우
+        out.append((m.start(), CODE_KINDS.get(m.group(1), "!코드 " + m.group(1))))
     return sorted(out)
 
 
@@ -321,6 +349,9 @@ class Interpreter:
             it.requested_kinds = {x.kind for x in items
                                   if x.person == it.person and x.date == it.date and x.kind}
         self._classify(items, body)
+        if any(it.frm for it in items):
+            # 시간이 적힌 줄이 있으면, 시간 없이 이름만 나온 '수정/등록'은 사유 설명으로 보고 뺀다
+            items = [it for it in items if it.frm or it.action not in ("수정", "일정등록")]
         for it in items:
             st = next((r.get("이용상태", "") for r in rows if r["성명"] == it.person), "")
             if st in STATUS_BLOCK:
@@ -328,7 +359,9 @@ class Interpreter:
             elif it.kind.startswith("!"):
                 it.status, it.note = "사람 처리", f"'{it.kind[1:]}' 요청은 자동 처리하지 않아요"
             elif it.action == "기타":
-                it.status, it.note = "사람 처리", "일정/실적 요청이 아닌 것 같아요"
+                it.status, it.note = "요청 아님", "일정/실적 요청이 아닌 것 같아요"
+            elif it.action == "수정" and not it.frm:
+                it.status, it.note = "사람 처리", "시간이 없어서 어떻게 바꿀지 사람이 봐야 해요"
         return items
 
     def _client_desc(self, name, rows):
@@ -366,12 +399,24 @@ class Interpreter:
             prv = [k for p, k in kinds if seg_start <= p < pos]
             return prv[-1] if prv else ""
 
+        def same_line_name(s, e):
+            """시간과 같은 줄에 있는 이름 (앞뒤 상관없이 가장 가까운 것). '1010-1145 이점이어르신' 같은 경우."""
+            ls = body.rfind("\n", 0, s) + 1
+            le = body.find("\n", e)
+            le = len(body) if le < 0 else le
+            on_line = [(p, x) for p, x in names if ls <= p < le]
+            if not on_line:
+                return None
+            return min(on_line, key=lambda px: min(abs(px[0] - s), abs(px[0] - e)))
+
         items = []
         for s, e, a, b in times:
-            n = before(names, s) or next(((p, x) for p, x in names if p > s), None)
+            n = same_line_name(s, e) or before(names, s) or next(((p, x) for p, x in names if p > s), None)
             dd = before(dates, s) or (dates[0] if dates else None)
-            items.append(Item(ic=ic, person=n[1] if n else "", date=dd[1] if dd else msg_date, frm=a, to=b,
-                              kind=kind_near(s, e), source=body))
+            it = Item(ic=ic, person=n[1] if n else "", date=dd[1] if dd else msg_date, frm=a, to=b,
+                      kind=kind_near(s, e), source=body)
+            it.pos = s
+            items.append(it)
         timed_names = {x.person for x in items}
         for pos, n in names:
             if n in timed_names:
@@ -386,12 +431,25 @@ class Interpreter:
                     tgt.action = "수정"
                     continue
             dd = before(dates, pos) or (dates[0] if dates else None)
-            items.append(Item(ic=ic, person=n, date=dd[1] if dd else msg_date,
-                              kind=kind_near(pos, pos + len(n)), source=body))
+            it = Item(ic=ic, person=n, date=dd[1] if dd else msg_date,
+                      kind=kind_near(pos, pos + len(n)), source=body)
+            it.pos = pos
+            items.append(it)
         return items
 
     def _classify(self, items, body):
-        """Jev: 항목마다 요청 종류."""
+        """요청 종류: 요청 낱말이 있으면 그걸로 (그 줄 뒤에 처음 나오는 낱말, 없으면 앞의 마지막 낱말),
+        낱말이 전혀 없을 때만 Jev 로."""
+        masked = body  # 이름 속 낱말(조정순의 '조정' 등)을 요청으로 읽지 않게 이름은 지운다
+        for n in {x for it in items for x in (it.person, it.old_person) if x}:
+            masked = masked.replace(n, " " * len(n))
+        words = find_action_words(masked)
+        for it in items:
+            if it.action or not words:
+                continue
+            p = getattr(it, "pos", 0)
+            after = [a for q, a in words if q >= p]
+            it.action = after[0] if after else words[-1][1]
         todo = [it for it in items if not it.action]
         if not todo:
             return

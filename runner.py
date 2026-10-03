@@ -113,38 +113,41 @@ def _replace(page, dlg, it, old, kind, log, now):
                 dict(person=it.person, date=it.date, frm=frm, to=to, kind=kind), log, now)
 
 
+def day_plans_all(page, ic, d):
+    """그날 그 생활지원사의 모든 일정 (어르신 상관없이)."""
+    g.open_plan(page, ic, *g.plan_month(d))
+    ds = d.strftime("%Y%m%d")
+    ps = [p for p in g.read_plans(page) if p["date"] == ds]
+    g.close_layer(page)
+    return ps
+
+
 def _modify(page, dlg, it, ask, log, now):
-    """수정·변경: 바꿀 일정이 있으면 바꾸고, 없으면 새로 등록한다.
-    1) 같은 날 같은 서비스 일정 (여러 개면 시간이 겹치는 것, 그래도 모르면 질문)
-    2) 없으면 시간이 겹치는 다른 서비스 일정 — 단, 같은 메시지에서 그 서비스도 따로 적혀 있으면 건드리지 않음
-    3) 그래도 없으면 새로 등록 (지난 시간이면 실적까지)"""
-    old_person = it.old_person or it.person
-    ps = day_plans(page, it.ic, old_person, it.date)
-    kind_of = lambda p: g.CODE_TO_KIND.get(p["code"])
-    over = (lambda p: g._overlap(p["from"], p["to"], it.frm, it.to)) if it.frm else (lambda p: False)
-    old = None
-    same = [p for p in ps if it.kind and kind_of(p) == it.kind]
-    if len(same) > 1:
-        same = [p for p in same if over(p)] or same
-    if len(same) == 1:
-        old = same[0]
-    elif len(same) > 1:
-        old = pick(ask, f"{it.label()}\n같은 서비스 일정이 여러 개예요. 어느 걸 바꿀까요?", same)
-    else:
-        others = [p for p in ps if over(p) and kind_of(p) not in getattr(it, "requested_kinds", set())]
-        if len(others) == 1:
-            old = others[0]
-        elif len(others) > 1:
-            old = pick(ask, f"{it.label()}\n시간이 겹치는 일정이 여러 개예요. 어느 걸 바꿀까요?", others)
-    if old is None:
-        if old_person != it.person:
-            raise WorkError(f"{old_person} 어르신 {it.date:%m/%d} 에 바꿀 일정이 없어요.")
-        if not it.frm:
-            raise WorkError("바꿀 일정을 찾지 못했고, 새로 넣을 시간도 적혀 있지 않아요.")
-        log("바꿀 일정이 없어서 새로 등록해요")
-        kind = it.kind or ask_kind(ask, it)
-        return g.do_register(page, dlg, it.ic, it.person, it.date, it.frm, it.to, kind, log, now)
-    return _replace(page, dlg, it, old, it.kind, log, now)
+    """수정·변경: 적힌 대로가 최종 일정이다.
+    그 시간과 겹치는 기존 일정은 어르신이 누구든 지우고(실적 있으면 실적부터) 적힌 대로 등록한다.
+    지난 시간이면 실적까지. 똑같은 일정이 이미 있으면 그대로 두고 실적만 확인."""
+    if not it.frm:
+        raise WorkError("시간이 없어서 어떻게 바꿀지 사람이 봐야 해요.")
+    kind = it.kind
+    ps = day_plans_all(page, it.ic, it.date)
+    same = [p for p in ps if g._norm(p["person"]) == g._norm(it.person) and p["from"] == it.frm
+            and p["to"] == it.to and (not kind or g.CODE_TO_KIND.get(p["code"]) == kind)]
+    if same:
+        p = same[0]
+        log(f"이미 같은 일정이 있어요: {it.person} {_t(p)}")
+        if not p["result"] and g.is_past(it.date, p["to"], now):
+            g.open_result(page, it.person, it.ic, *g.plan_month(it.date))
+            g.register_result(page, dlg, p["seq"], it.date)
+            log(f"실적 등록: {_t(p)}")
+        return
+    over = [p for p in ps if g._overlap(p["from"], p["to"], it.frm, it.to)]
+    if not kind:  # 서비스가 안 적혀 있으면 겹치던 일정의 서비스를 그대로
+        kinds = {g.CODE_TO_KIND.get(p["code"]) for p in over} - {None}
+        kind = kinds.pop() if len(kinds) == 1 else ask_kind(ask, it)
+    for p in over:
+        log(f"겹치는 일정 지움: {p['person']} {_t(p)}")
+        g.do_delete(page, dlg, it.ic, p["person"], it.date, p["from"], p["to"], log)
+    g.do_register(page, dlg, it.ic, it.person, it.date, it.frm, it.to, kind, log, now)
 
 
 def _delete(page, dlg, it, ask, log):
