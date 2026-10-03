@@ -283,17 +283,24 @@ def run(app, people, planner_name, other, on_row, log, save=True):
     """people: [(이름, '일반'|'중점')]. on_row(i, 상태, 메모). 계획자를 먼저 확인하고, 틀리면 아무것도 저장하지 않는다.
     → (계획자 문제 문구 또는 None)"""
     from playwright.sync_api import sync_playwright
-    with sync_playwright() as pw:
-        if not app.chrome_debug_alive():
-            raise NeedLogin("크롬이 꺼져 있어요. [s-care 열기]를 누르고 로그인해 주세요.")
-        browser = pw.chromium.connect_over_cdp(app.CDP_URL)
-        page = browser.contexts[0].new_page()
-        try:
-            log(f"계획자 '{planner_name}' 확인 중")
-            planner = find_planner(page, planner_name)
-        finally:
-            page.close()
-    log(f"계획자 확인됨: {planner_name}")
+    if not app.chrome_debug_alive():
+        raise NeedLogin("크롬이 꺼져 있어요. [s-care 열기]를 누르고 로그인해 주세요.")
+    # 계획자 검색 버튼은 목록 화면에만 있어서 확인하려면 한 번 더 들어가야 한다.
+    # 한 번 확인된 계획자는 이 PC에 기억해 두고 다음부터는 건너뛴다.
+    known = app.load_settings().get("scare_planner_ids", {})
+    if planner_name in known:
+        planner = {"usrNm": planner_name, "usrId": known[planner_name]}
+    else:
+        with sync_playwright() as pw:
+            browser = pw.chromium.connect_over_cdp(app.CDP_URL)
+            page = browser.contexts[0].new_page()
+            try:
+                log(f"계획자 '{planner_name}' 확인 중")
+                planner = find_planner(page, planner_name)
+            finally:
+                page.close()
+        app.save_settings(scare_planner_ids={**known, planner_name: planner["usrId"]})
+        log(f"계획자 확인됨: {planner_name}")
 
     def work(i):
         name, group = people[i]
