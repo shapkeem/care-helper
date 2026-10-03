@@ -141,6 +141,16 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
 .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%);background:var(--text-primary);color:#fff;padding:8px 16px;
   border-radius:999px;font-size:13px;opacity:0;transition:opacity .2s;pointer-events:none}
 .toast.on{opacity:.92}
+.srow{display:flex;gap:16px;align-items:flex-end;flex-wrap:wrap;margin-bottom:10px}
+.srow label{display:grid;gap:4px;font-size:12px;color:var(--text-secondary)}
+.seg{display:inline-flex;border:1px solid var(--border-strong);border-radius:var(--radius);overflow:hidden;height:34px}
+.seg span{padding:0 14px;display:flex;align-items:center;font-size:13px;cursor:pointer;color:var(--text-secondary)}
+.seg span+span{border-left:1px solid var(--border-strong)}
+.seg span.on{background:var(--bg-accent);color:var(--text-accent);font-weight:600}
+#sNames{height:96px;resize:vertical}
+.srow2{display:grid;grid-template-columns:90px 60px 84px minmax(0,1fr);gap:10px;padding:9px 14px;align-items:center;border-bottom:1px solid var(--border);font-size:13px}
+.srow2.th{font-size:12px;color:var(--text-secondary);background:var(--surface-1)}
+.srow2 .note{color:var(--text-secondary);font-size:12px}
 </style>
 </head>
 <body>
@@ -150,6 +160,7 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
     <div class="nav on" data-p="daily">일일실적 점검</div>
     <div class="nav" data-p="kakao">카톡 요청 처리</div>
     <div class="nav" data-p="conv">제공계획서 변환</div>
+    <div class="nav" data-p="scare">서비스 제공계획 입력</div>
     <div class="side-bottom">
       <div class="nav" data-p="settings">설정</div>
       <div><span class="pill" id="pill"><i></i><span id="pillText">상태 확인 중...</span></span></div>
@@ -231,8 +242,27 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
       <div class="logs" id="clog" style="flex:1;height:auto;min-height:120px"></div>
     </section>
 
-    <!-- 설정 -->
-    <section class="page" id="p-settings">
+    <!-- s-care 서비스 제공계획 입력 -->
+    <section class="page" id="p-scare">
+      <div class="head">
+        <div><div class="title">서비스 제공계획 입력</div><div class="sub">s-care에 서비스 제공계획을 입력하고 저장해요. 로그인은 크롬 창에서 직접 해 주세요.</div></div>
+        <div class="actions"><button id="scOpen">s-care 열기</button><button class="primary" id="scStart">입력 시작</button></div>
+      </div>
+      <div class="srow">
+        <label>계획자<input type="text" id="scPlanner" style="width:140px" autocomplete="off" placeholder="이름"></label>
+        <label>타서비스 연계<span class="seg" id="scOther"><span data-v="0">필요없음</span><span data-v="1">의뢰필요</span></span></label>
+        <label>기본 군<span class="seg" id="scGroup"><span data-v="일반">일반군</span><span data-v="중점">중점군</span></span></label>
+      </div>
+      <textarea id="sNames" placeholder="어르신 이름을 한 줄에 한 분씩 적어 주세요. 군이 다르면 이름 뒤에 '중점' 또는 '일반'을 붙여요.&#10;예) 최기순&#10;    김영희 중점"></textarea>
+      <div class="kstatus" id="scMsg">계획자·타서비스 연계·기본 군은 이 PC에 기억돼요.</div>
+      <div class="box" style="flex:1">
+        <div class="srow2 th"><span>어르신</span><span>군</span><span>상태</span><span>메모</span></div>
+        <div class="scroll" id="scList"><div class="empty">입력 시작을 누르면 여기에 결과가 나와요.</div></div>
+      </div>
+      <div class="logs" id="sclog" style="height:90px"></div>
+    </section>
+
+    <!-- 설정 -->    <section class="page" id="p-settings">
       <div class="head"><div><div class="title">설정</div><div class="sub">이 PC의 윈도우 계정에만 암호화해서 저장돼요.</div></div></div>
       <div class="form">
         <label>goodeos 아이디<input type="text" id="sId" autocomplete="off"></label>
@@ -384,6 +414,22 @@ function rvFinish(result){ $("review").classList.remove("on"); api.conv_review_d
 $("rvApply").onclick = () => { const r={}; RV.props.forEach(p=>{ if(RV.on[p.pid]) r[p.pid]=RV.val[p.pid] ?? p.suggested; }); rvFinish(r); };
 $("rvSkip").onclick = () => { if(confirm("모든 수정 제안을 건너뛰고 원래 값 그대로 변환할까요?")) rvFinish({}); };
 
+// ---- s-care 서비스 제공계획 입력
+function seg(id, v){ document.querySelectorAll("#"+id+" span").forEach(s=>s.classList.toggle("on", s.dataset.v===String(v))); }
+function segVal(id){ const s=document.querySelector("#"+id+" span.on"); return s ? s.dataset.v : null; }
+["scOther","scGroup"].forEach(id=>$(id).onclick=e=>{ if(e.target.dataset.v!==undefined) seg(id, e.target.dataset.v); });
+let SC = [];
+function scMsg(t, err){ $("scMsg").textContent=t; $("scMsg").style.color = err ? "var(--text-danger)" : ""; }
+function scRender(){
+  $("scList").innerHTML = SC.map(r=>'<div class="srow2"><span><b>'+esc(r.name)+'</b></span><span>'+esc(r.group)+'</span><span><span class="badge '+(BADGE[r.status]||"b-idle")+'">'+esc(r.status)+'</span></span><span class="note">'+esc(r.note||"")+'</span></div>').join("");
+}
+$("scOpen").onclick = async () => { const e = await api.scare_open(); scMsg(e || "크롬 창을 여는 중...", !!e); };
+$("scStart").onclick = async () => {
+  const r = await api.scare_start($("sNames").value, segVal("scGroup"), $("scPlanner").value, segVal("scOther")==="1");
+  if(r.error){ scMsg(r.error, true); alert(r.error); return; }
+  SC = r.people.map(p=>({...p, status:"대기", note:""})); scRender();
+  $("sclog").textContent=""; $("scStart").disabled=true; scMsg("입력하는 중이에요...");
+};
 // ---- 설정
 $("sSave").onclick = async () => {
   // 가려진 채 그대로면 null → 저장돼 있던 값을 그대로 쓴다
@@ -443,6 +489,16 @@ window.App = { on(ev, d){
         if(d.deletable){ $("cDoneRow").style.display="flex"; $("cDoneText").textContent="변환이 끝났어요. 다 확인했으면 원본과 결과를 정리할 수 있어요."; }
       }
       convRefresh(); break;
+    case "s_msg": scMsg(d.msg, !d.ok); break;
+    case "s_log": { const l=$("sclog"); l.textContent += (l.textContent?"\n":"")+d; l.scrollTop=l.scrollHeight; break; }
+    case "s_row": Object.assign(SC[d.i], {status:d.status, note:d.note}); scRender(); break;
+    case "s_done": {
+      $("scStart").disabled=false;
+      if(d && d.error){ scMsg(d.error, true); alert(d.error+"\n\n아무것도 저장하지 않았어요."); break; }
+      const ok=SC.filter(r=>r.status==="완료").length, bad=SC.filter(r=>r.status!=="완료");
+      scMsg("끝났어요: "+SC.length+"분 중 "+ok+"분 저장", bad.length>0);
+      if(bad.length) alert("확인이 필요한 어르신이 있어요.\n\n"+bad.map(r=>"· "+r.name+": "+r.note).join("\n"));
+      break; }
     case "settings_msg": $("sMsg").textContent=d.msg; $("sMsg").classList.toggle("err", !d.ok); refreshStatus(); break;
     case "update": $("updateBtn").style.display="block"; $("updateBtn").textContent="v"+d.version+" 업데이트"; break;
     case "update_progress": $("updateBtn").textContent="업데이트 중... "+d+"%"; break;
@@ -464,6 +520,7 @@ window.addEventListener("pywebviewready", async () => {
   $("sId").value = s.userId; $("sPw").value = s.hasPw ? PW_MASK : ""; $("sHide").checked = s.hideChrome;
   if(s.jevEnv){ $("jevHint").textContent="Jev API 키는 이 PC 환경변수(TYPESAFE_API_KEY)에 있는 걸 쓰고 있어요."; }
   else if(s.hasJev){ $("sJev").value = PW_MASK; }
+  const sc = await api.scare_info(); $("scPlanner").value = sc.planner; seg("scOther", sc.other ? "1" : "0"); seg("scGroup", sc.group);
   refreshStatus(); setInterval(refreshStatus, 8000);
 });
 </script>

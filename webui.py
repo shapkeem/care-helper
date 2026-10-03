@@ -347,6 +347,62 @@ class Api:
             return f"이전 변환 파일 {len(files)}개를 휴지통으로 보냈어요."
         return "이전 파일을 휴지통으로 보내지 못했어요. 열려 있는지 확인해 주세요." if files else "지울 파일이 없어요."
 
+    # ---- s-care 서비스 제공계획
+    def scare_info(self):
+        s = self._app.load_settings()
+        return {"planner": s.get("scare_planner", ""), "other": bool(s.get("scare_other", False)),
+                "group": s.get("scare_group", "일반")}
+
+    def scare_open(self):
+        if self._busy["v"]:
+            return "다른 작업이 진행 중이에요."
+        self._busy["v"] = True
+
+        def work():
+            import scare_plan as sp
+            try:
+                ok = sp.open_site(self._app)
+                msg = ("s-care에 로그인되어 있어요. 홈 화면을 열었어요." if ok
+                       else "크롬 창에서 s-care에 로그인해 주세요. 로그인한 뒤 [입력 시작]을 누르면 돼요.")
+                self._emit("s_msg", {"ok": True, "msg": msg})
+            except Exception as e:
+                self._emit("s_msg", {"ok": False, "msg": f"크롬을 열지 못했어요: {e}"})
+            finally:
+                self._busy["v"] = False
+        self._thread(work)
+        return None
+
+    def scare_start(self, text, group, planner, other):
+        import scare_plan as sp
+        if self._busy["v"]:
+            return {"error": "다른 작업이 진행 중이에요."}
+        planner = (planner or "").strip()
+        if not planner:
+            return {"error": "계획자 이름을 넣어 주세요."}
+        try:
+            people = sp.parse_people(text, group)
+        except ValueError as e:
+            return {"error": str(e)}
+        if not people:
+            return {"error": "어르신 이름을 넣어 주세요."}
+        self._app.save_settings(scare_planner=planner, scare_other=bool(other), scare_group=group)
+        self._busy["v"] = True
+
+        def work():
+            log = lambda m: self._emit("s_log", m)
+            try:
+                sp.run(self._app, people, planner, bool(other),
+                       lambda i, st, note: self._emit("s_row", {"i": i, "status": st, "note": note}), log)
+                self._emit("s_done", None)
+            except sp.ScareError as e:  # 로그인 안 됨, 계획자 틀림: 아무것도 저장하지 않음
+                self._emit("s_done", {"error": str(e)})
+            except Exception as e:
+                self._emit("s_done", {"error": f"문제가 생겼어요: {str(e).splitlines()[0][:200]}"})
+            finally:
+                self._busy["v"] = False
+        self._thread(work)
+        return {"people": [{"name": n, "group": g} for n, g in people]}
+
     # ---- 설정
     def save_settings(self, user_id, password, jev_key, hide):
         a = self._app
