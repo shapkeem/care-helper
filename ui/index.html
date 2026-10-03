@@ -312,8 +312,11 @@ async function convRefresh(){
   const s = await api.conv_info();
   $("cSrc").textContent = s.srcCount + "개";
   // 오늘 것이 아니면 [변환 시작] 때 새로 받아요
-  $("cRoster").textContent = s.roster ? s.roster + " 것" : "없음";
-  $("cWorkers").textContent = s.workers ? s.workers + " 것" : "없음";
+  // 최신(오늘 받은 것)은 초록, 지난 날짜·없음은 빨강
+  for (const [id, txt, fresh] of [["cRoster", s.roster, s.rosterToday], ["cWorkers", s.workers, s.workersToday]]) {
+    $(id).textContent = txt || "없음";
+    $(id).style.color = fresh ? "var(--text-success)" : "var(--text-danger)";
+  }
   $("cLeftRow").style.display = s.leftovers ? "flex" : "none";
   $("cLeftText").textContent = "'작업후' 폴더에 이전에 변환된 파일 " + s.leftovers + "개가 남아 있어요.";
 }

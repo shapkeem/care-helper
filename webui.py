@@ -253,7 +253,7 @@ class Api:
         leftovers = [f for f in dst.glob("*.xlsx") if not f.name.startswith("~$")]
 
         def day_text(d):
-            return "" if d is None else ("오늘" if d == today else f"{d:%m.%d}")
+            return "" if d is None else ("최신" if d == today else f"{d:%Y.%m.%d}.")
         return {"src": str(src), "dst": str(dst), "srcCount": n_src,
                 "roster": day_text(r_day), "rosterToday": r_day == today,
                 "workers": day_text(w_day), "workersToday": w_day == today, "leftovers": len(leftovers)}
