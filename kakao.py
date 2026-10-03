@@ -405,7 +405,15 @@ class Interpreter:
             return xs[-1] if xs else None
 
         def kind_near(pos, end):
-            nxt = [k for p, k in kinds if end <= p <= end + 14]
+            # 같은 줄에 서비스가 있으면 그것 (시간 뒤 먼저, 없으면 '방문1306-1316' 처럼 시간 앞)
+            ls = body.rfind("\n", 0, pos) + 1
+            le = body.find("\n", end)
+            le = len(body) if le < 0 else le
+            line_after = [k for p, k in kinds if end <= p < le]
+            line_before = [k for p, k in kinds if ls <= p < pos]
+            if line_after or line_before:
+                return line_after[0] if line_after else line_before[-1]
+            nxt =[k for p, k in kinds if end <= p <= end + 14]
             if nxt:
                 return nxt[0]
             seg_start = before(names, pos)[0] if before(names, pos) else 0
