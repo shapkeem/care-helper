@@ -122,7 +122,8 @@ def open_chrome(hidden=False):
         ua = _normal_user_agent(exe)
         if ua:
             args.append(f"--user-agent={ua}")
-    proc = subprocess.Popen(args + [SITE + "/"])
+    # 크롬이 내보내는 진단 기록(확장 프로그램·GCM 오류 등)은 쓸모없으니 버린다
+    proc = subprocess.Popen(args + [SITE + "/"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     _hidden_proc["p"] = proc if hidden else None
     try:
         with open(CHROME_MODE_PATH, "w", encoding="utf-8") as f:
