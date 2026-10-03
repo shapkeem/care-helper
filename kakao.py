@@ -36,6 +36,8 @@ def find_action_words(text):
                 out.append((m.start(), act))
                 used.append((m.start(), m.end()))
     return sorted(out)
+REQUEST_RE = re.compile(r"부탁|해\s*주|주세요|바랍니다|요청")
+DUP_RE = re.compile(r"중복|두\s*번\s*들어")  # 중복 정리는 어느 것을 지울지 사람이 판단
 STATUS_BLOCK = {"종결", "장기부재", "타기관이전"}
 
 ACTIONS = {
@@ -184,6 +186,11 @@ def find_dates(text, msg_date):
     for word, delta in (("그저께", -2), ("어제", -1), ("오늘", 0), ("내일", 1), ("낼", 1)):
         for m in re.finditer(word, text):
             out.append((m.start(), msg_date + timedelta(days=delta)))
+    for m in re.finditer(r"(?<![\d가-힣])([월화수목금토일])\s*(?:요일|욜)", text):  # 요일만: 가장 가까운 지난 그 요일
+        if any(abs(p - m.start()) < 8 for p, _ in out):
+            continue
+        back = (msg_date.weekday() - "월화수목금토일".index(m.group(1))) % 7
+        out.append((m.start(), msg_date - timedelta(days=back)))
     return sorted(out)
 
 
@@ -299,6 +306,10 @@ class Interpreter:
             ic = self.ask("이 요청은 어느 생활지원사 거예요?\n\n" + body[:200], {c: None for c in self.ics})
         if not ic:
             return [Item(ic="?", source=body, action="기타", status="사람 처리", note="지원사를 모름")]
+        if not find_action_words(body) and not REQUEST_RE.search(body):  # '~댁으로 이동합니다' 같은 알림
+            return [Item(ic=ic, source=body, action="기타", status="요청 아님", note="요청하는 말이 없어요")]
+        if DUP_RE.search(body):
+            return [Item(ic=ic, source=body, action="기타", status="사람 처리", note="중복 일정은 사람이 봐야 해요")]
         rows = self.clients_of(ic)
         clients = [r["성명"] for r in rows]
         found, unknown, ambiguous = find_names(body, clients)
@@ -343,6 +354,8 @@ class Interpreter:
         dates = find_dates(body, msg_date)
         kinds = find_kinds(body)
         if not names and not times:
+            if not dates and not kinds:  # '다시 입력 부탁드립니다' 처럼 앞뒤 맥락이 없는 말
+                return [Item(ic=ic, source=body, action="기타", status="요청 아님", note="누구·언제인지 없는 말이에요")]
             return [Item(ic=ic, source=body, action="기타", status="사람 처리", note="대상자/시간을 찾지 못함")]
         items = self._build_items(ic, body, names, times, dates, kinds, msg_date)
         for it in items:  # 수정할 때 서로의 일정을 잘못 바꾸지 않게

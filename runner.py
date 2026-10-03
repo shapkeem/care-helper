@@ -144,8 +144,19 @@ def _modify(page, dlg, it, ask, log, now):
     if not kind:  # 서비스가 안 적혀 있으면 겹치던 일정의 서비스를 그대로
         kinds = {g.CODE_TO_KIND.get(p["code"]) for p in over} - {None}
         kind = kinds.pop() if len(kinds) == 1 else ask_kind(ask, it)
+    # 같은 어르신의 같은 서비스가 다른 시간에 있으면 옮기는 건지 추가인지 모르니 묻는다
+    moved = [p for p in ps if p not in over and g._norm(p["person"]) == g._norm(it.person)
+             and g.CODE_TO_KIND.get(p["code"]) == kind]
+    for p in moved:
+        k = ask(f"{it.label()}\n같은 {kind} 일정이 다른 시간에도 있어요: {_desc(p)}", {
+            "옮김": "원래 일정을 지우고 새 시간으로 등록",
+            "추가": "원래 일정은 그대로 두고 새 시간도 등록"})
+        if k is None:
+            raise WorkError("건너뜀")
+        if k == "옮김":
+            over.append(p)
     for p in over:
-        log(f"겹치는 일정 지움: {p['person']} {_t(p)}")
+        log(f"기존 일정 지움: {p['person']} {_t(p)}")
         g.do_delete(page, dlg, it.ic, p["person"], it.date, p["from"], p["to"], log)
     g.do_register(page, dlg, it.ic, it.person, it.date, it.frm, it.to, kind, log, now)
 
