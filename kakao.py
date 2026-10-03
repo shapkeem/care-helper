@@ -52,6 +52,7 @@ class Item:
     source: str = ""        # 원문
     status: str = "대기"
     log: list = field(default_factory=list)
+    requested_kinds: set = field(default_factory=set)  # 같은 메시지에서 같은 어르신·같은 날 요청된 서비스들
 
     def label(self):
         t = f"{self.frm[:2]}:{self.frm[2:]}~{self.to[:2]}:{self.to[2:]}" if self.frm else "시간없음"
@@ -316,6 +317,9 @@ class Interpreter:
         if not names and not times:
             return [Item(ic=ic, source=body, action="기타", status="사람 처리", note="대상자/시간을 찾지 못함")]
         items = self._build_items(ic, body, names, times, dates, kinds, msg_date)
+        for it in items:  # 수정할 때 서로의 일정을 잘못 바꾸지 않게
+            it.requested_kinds = {x.kind for x in items
+                                  if x.person == it.person and x.date == it.date and x.kind}
         self._classify(items, body)
         for it in items:
             st = next((r.get("이용상태", "") for r in rows if r["성명"] == it.person), "")
@@ -404,9 +408,16 @@ class Interpreter:
                 "criteria": ACTIONS,
             }
         ans = jev.ask({"message": body}, qs)
+        # 한 메시지 끝의 '변경 부탁드립니다' 처럼 요청이 모든 줄에 걸리는 경우가 많다.
+        # 확신 있는 줄들이 모두 같은 요청이면, 확신이 낮은 줄도 그 요청으로 본다.
+        sure = {ans[f"a{i}"]["choice"] for i in range(len(todo)) if ans[f"a{i}"]["confidence"] >= CONF_OK}
+        common = next(iter(sure)) if len(sure) == 1 else None
         for i, it in enumerate(todo):
             a = ans[f"a{i}"]
             it.action = a["choice"]
+            if a["confidence"] < CONF_OK and common:
+                it.action = common
+                continue
             if a["confidence"] < CONF_OK:
                 pick = self.ask(f"{it.label()}\n이 요청은 무엇인가요?\n\n{body[:200]}", dict(ACTION_LABELS))
                 it.action = pick or "기타"

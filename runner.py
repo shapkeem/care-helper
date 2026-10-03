@@ -114,21 +114,36 @@ def _replace(page, dlg, it, old, kind, log, now):
 
 
 def _modify(page, dlg, it, ask, log, now):
+    """수정·변경: 바꿀 일정이 있으면 바꾸고, 없으면 새로 등록한다.
+    1) 같은 날 같은 서비스 일정 (여러 개면 시간이 겹치는 것, 그래도 모르면 질문)
+    2) 없으면 시간이 겹치는 다른 서비스 일정 — 단, 같은 메시지에서 그 서비스도 따로 적혀 있으면 건드리지 않음
+    3) 그래도 없으면 새로 등록 (지난 시간이면 실적까지)"""
     old_person = it.old_person or it.person
     ps = day_plans(page, it.ic, old_person, it.date)
-    if not ps:
-        raise WorkError(f"{old_person} 어르신 {it.date:%m/%d} 일정이 없어요. 수정할 것을 찾지 못했어요.")
-    cands = []
-    if it.frm:
-        cands = [p for p in ps if g._overlap(p["from"], p["to"], it.frm, it.to)]
-    if not cands and it.kind:
-        cands = [p for p in ps if g.CODE_TO_KIND.get(p["code"]) == it.kind]
-    if not cands and len(ps) == 1:
-        cands = ps
-    if len(cands) == 1:
-        old = cands[0]
+    kind_of = lambda p: g.CODE_TO_KIND.get(p["code"])
+    over = (lambda p: g._overlap(p["from"], p["to"], it.frm, it.to)) if it.frm else (lambda p: False)
+    old = None
+    same = [p for p in ps if it.kind and kind_of(p) == it.kind]
+    if len(same) > 1:
+        same = [p for p in same if over(p)] or same
+    if len(same) == 1:
+        old = same[0]
+    elif len(same) > 1:
+        old = pick(ask, f"{it.label()}\n같은 서비스 일정이 여러 개예요. 어느 걸 바꿀까요?", same)
     else:
-        old = pick(ask, f"{it.label()}\n어느 일정을 수정할까요?", cands or ps)
+        others = [p for p in ps if over(p) and kind_of(p) not in getattr(it, "requested_kinds", set())]
+        if len(others) == 1:
+            old = others[0]
+        elif len(others) > 1:
+            old = pick(ask, f"{it.label()}\n시간이 겹치는 일정이 여러 개예요. 어느 걸 바꿀까요?", others)
+    if old is None:
+        if old_person != it.person:
+            raise WorkError(f"{old_person} 어르신 {it.date:%m/%d} 에 바꿀 일정이 없어요.")
+        if not it.frm:
+            raise WorkError("바꿀 일정을 찾지 못했고, 새로 넣을 시간도 적혀 있지 않아요.")
+        log("바꿀 일정이 없어서 새로 등록해요")
+        kind = it.kind or ask_kind(ask, it)
+        return g.do_register(page, dlg, it.ic, it.person, it.date, it.frm, it.to, kind, log, now)
     return _replace(page, dlg, it, old, it.kind, log, now)
 
 
