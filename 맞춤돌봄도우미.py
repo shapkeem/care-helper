@@ -617,20 +617,21 @@ def check_status_all():
     """→ (goodeos 상태, s-care 상태)
     goodeos: 'off'(자동화 크롬 꺼짐) / 'login'(로그인 필요) / 'ok'(로그인됨) / 'ok_hidden'(백그라운드에서 로그인됨)
              / 'auto'(지금은 로그아웃이지만 저장된 로그인 정보로 작업할 때 자동 로그인) / 'backup'
-    s-care: None(s-care 탭 없음) / 'ok' / 'login'"""
+    s-care: None(s-care 크롬 꺼짐) / 'ok' / 'login'  (s-care 는 크롬을 따로 띄운다)"""
+    import scare_plan
+    try:
+        scare = scare_plan.status()
+    except Exception:
+        scare = None
     mode = chrome_mode()
-    if mode is None:
-        return "off", None
+    if mode is None:  # 작업이 없으면 꺼 두는 게 정상. 로그인 정보가 있으면 작업할 때 알아서 켜고 로그인한다
+        return ("auto" if load_credentials() else "off"), scare
     from playwright.sync_api import sync_playwright
-    goodeos, scare = None, None
+    goodeos = None
     with sync_playwright() as pw:
         browser = pw.chromium.connect_over_cdp(CDP_URL)
         for ctx in browser.contexts:
             for page in ctx.pages:
-                if "s-care.mohw.go.kr" in page.url:
-                    if scare != "ok":
-                        scare = "ok" if "/eics/" in page.url and page.frame(name="mnifrm_m") else "login"
-                    continue
                 if "goodeos.co.kr" not in page.url or goodeos:
                     continue
                 if "daily_backup" in page.url:

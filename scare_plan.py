@@ -260,13 +260,86 @@ def fill_one(page, name, group, planner, other, log, save=True):
     return f"저장 완료 · 서비스 총제공량 {total}"
 
 
-# ---------------------------------------------------------------- 크롬 / 여러 명 동시에
-def open_site(app):
-    """자동화용 크롬을 창으로 띄우고 s-care 탭을 연다 (로그인돼 있으면 홈). → 로그인 여부"""
+# ---------------------------------------------------------------- s-care 전용 크롬
+# goodeos 용 크롬(9222, 백그라운드일 수 있음)과 따로 띄운다. 같은 프로필 폴더는 두 크롬이 함께 못 쓰므로 폴더도 따로.
+PORT = 9223
+CDP = f"http://127.0.0.1:{PORT}"
+
+
+def chrome_alive():
+    import socket
+    try:
+        socket.create_connection(("127.0.0.1", PORT), timeout=0.3).close()
+        return True
+    except OSError:
+        return False
+
+
+_proc = {"p": None}  # 이 프로그램이 띄운 s-care 크롬
+
+
+def ensure_chrome(app, timeout=40):
+    import os
+    import subprocess
+    import time
+    if chrome_alive():
+        return
+    p = _proc["p"]
+    if p is not None and p.poll() is None:  # 켜는 중 (처음 켤 때는 연결이 늦게 열림): 또 켜지 않고 기다린다
+        end = time.time() + timeout
+        while time.time() < end:
+            if chrome_alive():
+                return
+            time.sleep(0.5)
+        raise RuntimeError("s-care용 크롬에 연결되지 않았습니다. 크롬 창을 닫고 다시 눌러 주세요.")
+    exe = next((p for p in app.CHROME_PATHS if os.path.exists(p)), None)
+    if not exe:
+        raise RuntimeError("크롬(chrome.exe)을 찾을 수 없습니다.")
+    profile = os.path.join(app.APP_DATA_DIR, "scare_profile")
+    os.makedirs(profile, exist_ok=True)
+    _proc["p"] = subprocess.Popen(
+        [exe, f"--remote-debugging-port={PORT}", f"--user-data-dir={profile}", "--no-first-run",
+         "--no-default-browser-check", BASE + "/"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    end = time.time() + timeout
+    while time.time() < end:
+        if chrome_alive():
+            return
+        time.sleep(0.5)
+    raise RuntimeError("s-care용 크롬을 켰지만 연결되지 않았습니다. 잠시 뒤 다시 눌러 주세요.")
+
+
+def close_chrome():
+    if not chrome_alive():
+        return
     from playwright.sync_api import sync_playwright
     with sync_playwright() as pw:
-        app.ensure_chrome(hidden=False, pw=pw)
-        browser = pw.chromium.connect_over_cdp(app.CDP_URL)
+        try:
+            pw.chromium.connect_over_cdp(CDP).new_browser_cdp_session().send("Browser.close")
+        except Exception:
+            pass
+
+
+def status():
+    """None(s-care 크롬 꺼짐) / 'ok' / 'login'"""
+    if not chrome_alive():
+        return None
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        browser = pw.chromium.connect_over_cdp(CDP)
+        for ctx in browser.contexts:
+            for page in ctx.pages:
+                if logged_in(page):
+                    return "ok"
+    return "login"
+
+
+def open_site(app):
+    """s-care 전용 크롬을 띄우고 s-care 탭을 연다 (로그인돼 있으면 홈). → 로그인 여부"""
+    from playwright.sync_api import sync_playwright
+    ensure_chrome(app)
+    with sync_playwright() as pw:
+        browser = pw.chromium.connect_over_cdp(CDP)
         ctx = browser.contexts[0]
         page = next((p for p in ctx.pages if "s-care.mohw.go.kr" in p.url), None) or ctx.new_page()
         page.bring_to_front()
@@ -278,13 +351,12 @@ def open_site(app):
             page.goto(BASE + "/")
         return False
 
-
 def run(app, people, planner_name, other, on_row, log, save=True):
     """people: [(이름, '일반'|'중점')]. on_row(i, 상태, 메모). 계획자를 먼저 확인하고, 틀리면 아무것도 저장하지 않는다.
     → (계획자 문제 문구 또는 None)"""
     from playwright.sync_api import sync_playwright
-    if not app.chrome_debug_alive():
-        raise NeedLogin("크롬이 꺼져 있어요. [s-care 열기]를 누르고 로그인해 주세요.")
+    if not chrome_alive():
+        raise NeedLogin("s-care 크롬이 꺼져 있어요. [s-care 열기]를 누르고 로그인해 주세요.")
     # 계획자 검색 버튼은 목록 화면에만 있어서 확인하려면 한 번 더 들어가야 한다.
     # 한 번 확인된 계획자는 이 PC에 기억해 두고 다음부터는 건너뛴다.
     known = app.load_settings().get("scare_planner_ids", {})
@@ -292,7 +364,7 @@ def run(app, people, planner_name, other, on_row, log, save=True):
         planner = {"usrNm": planner_name, "usrId": known[planner_name]}
     else:
         with sync_playwright() as pw:
-            browser = pw.chromium.connect_over_cdp(app.CDP_URL)
+            browser = pw.chromium.connect_over_cdp(CDP)
             page = browser.contexts[0].new_page()
             try:
                 log(f"계획자 '{planner_name}' 확인 중")
@@ -306,7 +378,7 @@ def run(app, people, planner_name, other, on_row, log, save=True):
         name, group = people[i]
         on_row(i, "처리 중", f"{group}군")
         with sync_playwright() as pw:
-            browser = pw.chromium.connect_over_cdp(app.CDP_URL)
+            browser = pw.chromium.connect_over_cdp(CDP)
             page = browser.contexts[0].new_page()
             keep = False
             try:
@@ -333,7 +405,7 @@ def run(app, people, planner_name, other, on_row, log, save=True):
         log(f"확인할 탭 {kept}개를 크롬에 열어 뒀어요. 다 보면 크롬을 닫아 주세요.")
     else:
         try:
-            app.close_chrome()
+            close_chrome()
             log("작업이 끝나서 크롬을 닫았어요.")
         except Exception:
             pass
