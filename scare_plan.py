@@ -324,9 +324,19 @@ def run(app, people, planner_name, other, on_row, log, save=True):
                         page.close()
                     except Exception:
                         pass
+        return keep
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
-        list(ex.map(work, range(len(people))))
+        kept = sum(ex.map(work, range(len(people))))
+    # 다 끝나면 크롬을 끈다 (켜 두면 PC가 무거워짐). 사람이 봐야 할 탭이 남아 있으면 그대로 둔다.
+    if kept:
+        log(f"확인할 탭 {kept}개를 크롬에 열어 뒀어요. 다 보면 크롬을 닫아 주세요.")
+    else:
+        try:
+            app.close_chrome()
+            log("작업이 끝나서 크롬을 닫았어요.")
+        except Exception:
+            pass
 
 
 def parse_people(text, default_group):

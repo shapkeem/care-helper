@@ -164,6 +164,7 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
     <div class="side-bottom">
       <div class="nav" data-p="settings">설정</div>
       <div><span class="pill" id="pill"><i></i><span id="pillText">상태 확인 중...</span></span></div>
+      <div><span class="pill" id="pill2" style="display:none;margin-top:0"><i></i><span id="pill2Text"></span></span></div>
       <button class="small primary" id="updateBtn">업데이트</button>
       <div class="ver" id="ver"></div>
     </div>
@@ -509,8 +510,12 @@ window.App = { on(ev, d){
 
 async function refreshStatus(){
   const s = await api.status(); if(!s) return;
-  $("pill").className = "pill " + (s.kind.startsWith("ok") ? "ok" : (s.kind==="login"||s.kind==="backup") ? "login" : "");
-  $("pillText").textContent = ({ok:"로그인됨", ok_hidden:"로그인됨 · 백그라운드", login:"로그인 필요", off:"크롬 꺼짐", backup:"백업 시간 (0~4시)"})[s.kind] || s.text;
+  $("pill").className = "pill " + ((s.kind.startsWith("ok")||s.kind==="auto") ? "ok" : (s.kind==="login"||s.kind==="backup") ? "login" : "");
+  $("pillText").textContent = ({ok:"goodeos 로그인됨", ok_hidden:"goodeos 로그인됨 · 백그라운드", auto:"goodeos 자동 로그인", login:"goodeos 로그인 필요", off:"크롬 꺼짐", backup:"goodeos 백업 시간 (0~4시)"})[s.kind] || s.text;
+  // s-care 탭이 열려 있을 때만 s-care 상태를 따로 보여 준다
+  $("pill2").style.display = s.scare ? "inline-flex" : "none";
+  $("pill2").className = "pill " + (s.scare==="ok" ? "ok" : "login");
+  $("pill2Text").textContent = s.scare==="ok" ? "s-care 로그인됨" : "s-care 로그인 필요";
 }
 
 window.addEventListener("pywebviewready", async () => {

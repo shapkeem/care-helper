@@ -609,26 +609,42 @@ def build_report(missing, absent_reg, n_users, n_absent, service_people, day=Non
 
 # ---------------------------------------------------------------- 전체 실행
 def check_status():
-    """'off'(자동화 크롬 꺼짐) / 'login'(로그인 필요) / 'ok'(goodeos 로그인됨) / 'ok_hidden'(백그라운드에서 로그인됨)"""
+    return check_status_all()[0]
+
+
+def check_status_all():
+    """→ (goodeos 상태, s-care 상태)
+    goodeos: 'off'(자동화 크롬 꺼짐) / 'login'(로그인 필요) / 'ok'(로그인됨) / 'ok_hidden'(백그라운드에서 로그인됨)
+             / 'auto'(지금은 로그아웃이지만 저장된 로그인 정보로 작업할 때 자동 로그인) / 'backup'
+    s-care: None(s-care 탭 없음) / 'ok' / 'login'"""
     mode = chrome_mode()
     if mode is None:
-        return "off"
+        return "off", None
     from playwright.sync_api import sync_playwright
+    goodeos, scare = None, None
     with sync_playwright() as pw:
         browser = pw.chromium.connect_over_cdp(CDP_URL)
         for ctx in browser.contexts:
             for page in ctx.pages:
-                if "goodeos.co.kr" not in page.url:
+                if "s-care.mohw.go.kr" in page.url:
+                    if scare != "ok":
+                        scare = "ok" if "/eics/" in page.url and page.frame(name="mnifrm_m") else "login"
+                    continue
+                if "goodeos.co.kr" not in page.url or goodeos:
                     continue
                 if "daily_backup" in page.url:
-                    return "backup"
+                    goodeos = "backup"
+                    continue
                 for fr in page.frames:
                     try:
                         if "로그아웃" in fr.evaluate("document.body ? document.body.innerText : ''"):
-                            return "ok_hidden" if mode == "hidden" else "ok"
+                            goodeos = "ok_hidden" if mode == "hidden" else "ok"
+                            break
                     except Exception:
                         pass
-    return "login"
+    if not goodeos:
+        goodeos = "auto" if load_credentials() else "login"
+    return goodeos, scare
 
 
 def run_daily_check(log, progress=lambda pct, msg: None):
@@ -862,6 +878,7 @@ STATUS_STYLE = {  # 상태: (배경, 글자, 문구)
     "ok": ("#DCFCE7", "#166534", "goodeos 로그인됨"),
     "ok_hidden": ("#DCFCE7", "#166534", "goodeos 로그인됨 · 크롬 백그라운드"),
     "login": ("#FEF3C7", "#92400E", "goodeos 로그인이 필요해요"),
+    "auto": ("#DCFCE7", "#166534", "goodeos 자동 로그인"),
     "backup": ("#FEF3C7", "#92400E", "goodeos 백업 시간 (0~4시)"),
     "off": ("#F1F5F9", "#475569", "자동화 크롬이 꺼져 있어요"),
     "check": ("#F1F5F9", "#475569", "상태 확인 중..."),

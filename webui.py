@@ -164,10 +164,10 @@ class Api:
         if self._busy["v"]:
             return None
         try:
-            kind = self._app.check_status()
+            kind, scare = self._app.check_status_all()
         except Exception:
-            kind = "off"
-        return {"kind": kind, "text": self._app.STATUS_STYLE[kind][2]}
+            kind, scare = "off", None
+        return {"kind": kind, "text": self._app.STATUS_STYLE[kind][2], "scare": scare}
 
     # ---- 일일실적 점검
     def check(self):
