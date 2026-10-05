@@ -253,6 +253,10 @@ def fill_one(page, name, group, planner, other, log, save=True):
         return f"입력만 함 (저장 안 함) · 서비스 총제공량 {total}"
 
     msgs.clear()
+    # 확인창(저장하시겠습니까?)을 진짜 창으로 띄우지 않고 화면 안에서 바로 '예'로 처리한다.
+    # 진짜 창은 여러 탭을 동시에 쓸 때 다른 탭 쪽 연결이 자동으로 '취소'해 버려 저장이 조용히 안 됐다.
+    f.evaluate("() => { window.__al = []; window.alert = m => { window.__al.push(String(m)); };"
+               " window.confirm = m => { window.__al.push(String(m)); return true; }; }")
     # 화면 밖이거나 다른 것에 가려져 마우스로 못 누르는 경우가 있어, 그때는 버튼의 클릭 동작을 직접 실행한다
     try:
         f.locator("#btnProvPlanSave").scroll_into_view_if_needed(timeout=5000)
@@ -262,9 +266,11 @@ def fill_one(page, name, group, planner, other, log, save=True):
     # 저장이 끝나면 대상자 정보의 제공계획 버튼 글자가 바뀐다
     try:
         f.wait_for_function("() => { const b = document.getElementById('btnProvPlan');"
-                            " return b && b.textContent.trim() !== '미입력'; }", timeout=45000)
+                            " const s = b && b.textContent.trim(); return s && s !== '미입력' && s !== '작성중'; }",
+                            timeout=45000)
     except Exception:
-        why = " / ".join(m for m in msgs if "저장하시겠습니까" not in m) or "저장이 끝났는지 확인하지 못했어요"
+        shown = msgs + (f.evaluate("() => window.__al || []") or [])
+        why = " / ".join(m for m in shown if "저장하시겠습니까" not in m) or "저장이 끝났는지 확인하지 못했어요"
         raise SaveFailed(f"{name}: 저장하지 못했어요: {why} (확인할 수 있게 탭을 열어 둘게요)")
     return f"저장 완료 · 서비스 총제공량 {total}"
 
@@ -388,6 +394,8 @@ def run(app, people, planner_name, other, on_row, log, save=True):
         on_row(i, "처리 중", f"{group}군")
         with sync_playwright() as pw:
             browser = pw.chromium.connect_over_cdp(CDP)
+            # 이 연결이 다른 탭의 알림창을 '처리할 사람이 없다'며 자동 취소하지 않게, 아무것도 안 하는 처리기를 둔다
+            browser.contexts[0].on("dialog", lambda d: None)
             page = browser.contexts[0].new_page()
             keep = False
             try:

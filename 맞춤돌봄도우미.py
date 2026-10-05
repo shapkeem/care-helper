@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "2.0.2"
+APP_VERSION = "2.0.3"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -388,7 +388,9 @@ def fill_results(rows, day, on_one, workers=FILL_PARALLEL):
     def worker():
         try:
             with sync_playwright() as pw:
-                page = pw.chromium.connect_over_cdp(CDP_URL).contexts[0].new_page()
+                ctx = pw.chromium.connect_over_cdp(CDP_URL).contexts[0]
+                ctx.on("dialog", lambda d: None)  # 다른 탭의 알림창을 이 연결이 자동 취소하지 않게
+                page = ctx.new_page()
                 try:
                     page.on("dialog", lambda d: d.accept())
                     page.goto(SITE + "/main/main.php")
