@@ -20,6 +20,10 @@ class NeedLogin(ScareError):
     pass
 
 
+class SaveFailed(ScareError):
+    """입력은 했는데 저장이 안 됨: 사람이 화면을 볼 수 있게 탭을 남긴다."""
+
+
 # ---------------------------------------------------------------- 입력할 내용
 P, PB, PK = "생활지원사", "광안노인복지관/생활지원사", "광안노인복지관"
 
@@ -249,14 +253,19 @@ def fill_one(page, name, group, planner, other, log, save=True):
         return f"입력만 함 (저장 안 함) · 서비스 총제공량 {total}"
 
     msgs.clear()
-    f.locator("#btnProvPlanSave").click()
+    # 화면 밖이거나 다른 것에 가려져 마우스로 못 누르는 경우가 있어, 그때는 버튼의 클릭 동작을 직접 실행한다
+    try:
+        f.locator("#btnProvPlanSave").scroll_into_view_if_needed(timeout=5000)
+        f.locator("#btnProvPlanSave").click(timeout=8000)
+    except Exception:
+        f.evaluate("() => document.getElementById('btnProvPlanSave').click()")
     # 저장이 끝나면 대상자 정보의 제공계획 버튼 글자가 바뀐다
     try:
         f.wait_for_function("() => { const b = document.getElementById('btnProvPlan');"
-                            " return b && b.textContent.trim() !== '미입력'; }", timeout=20000)
+                            " return b && b.textContent.trim() !== '미입력'; }", timeout=45000)
     except Exception:
         why = " / ".join(m for m in msgs if "저장하시겠습니까" not in m) or "저장이 끝났는지 확인하지 못했어요"
-        raise ScareError(f"저장하지 못했어요: {why}")
+        raise SaveFailed(f"{name}: 저장하지 못했어요: {why} (확인할 수 있게 탭을 열어 둘게요)")
     return f"저장 완료 · 서비스 총제공량 {total}"
 
 
@@ -385,6 +394,9 @@ def run(app, people, planner_name, other, on_row, log, save=True):
                 msg = fill_one(page, name, group, planner, other, log, save)
                 keep = not save
                 on_row(i, "완료", msg)
+            except SaveFailed as e:
+                keep = True
+                on_row(i, "확인 필요", str(e))
             except ScareError as e:
                 on_row(i, "확인 필요", str(e))
             except Exception as e:
