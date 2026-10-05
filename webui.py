@@ -124,6 +124,7 @@ class Api:
         self._win = None
         self._busy = {"v": False}
         self._check = None
+        self._filled = set()  # 실적을 넣은 사람 번호 (모두 넣기에서 다시 넣지 않게)
         self._upd = None
         import kakao_job
         self._job = kakao_job.KakaoJob(
@@ -182,7 +183,8 @@ class Api:
         try:
             data = a.run_daily_check(lambda m: None, lambda p, m: self._emit("progress", {"pct": p, "msg": m}))
             self._check = data
-            rows = [{"idx": i, "name": r["성명"], "ic": r["생활지원사"],
+            self._filled = set()
+            rows =[{"idx": i, "name": r["성명"], "ic": r["생활지원사"],
                      "phone": r.get("생활지원사 연락처") or "번호 없음", "kind": kind}
                     for i, (r, kind) in enumerate([(r, "missing") for r in data["missing"]] +
                                                   [(r, "absent") for r in data["absent_reg"]])]
@@ -213,9 +215,43 @@ class Api:
                 ok, msg = self._app.fill_result(r["생활지원사"], r["성명"], self._check["day"])
             finally:
                 self._busy["v"] = False
+            if ok:
+                self._filled.add(idx)
             self._emit("fill_done", {"idx": idx, "ok": ok, "msg": msg})
         self._thread(work)
         return None
+
+    def fill_all(self):
+        """실적 미입력인 사람 모두에게 탭을 나눠 동시에 실적을 넣는다."""
+        if self._busy["v"]:
+            return "다른 작업이 진행 중이에요. 끝난 뒤에 눌러 주세요."
+        if not self._check:
+            return "먼저 점검을 해 주세요."
+        rows = [(i, r["생활지원사"], r["성명"])
+                for i, (r, kind) in enumerate([(r, "missing") for r in self._check["missing"]])
+                if i not in self._filled]
+        if not rows:
+            return "실적을 넣을 사람이 없어요."
+        day = self._check["day"]
+        self._busy["v"] = True
+
+        def one(idx, ok, msg):
+            if ok:
+                self._filled.add(idx)
+            self._emit("fill_done", {"idx": idx, "ok": ok, "msg": msg, "quiet": True})
+
+        def work():
+            try:
+                self._app.fill_results(rows, day, one)
+            except Exception as e:
+                for idx, _, _ in rows:
+                    if idx not in self._filled:
+                        self._emit("fill_done", {"idx": idx, "ok": False, "msg": f"문제가 생겼어요: {e}", "quiet": True})
+            finally:
+                self._busy["v"] = False
+            self._emit("fill_all_done", {"total": len(rows), "ok": sum(1 for i, _, _ in rows if i in self._filled)})
+        self._thread(work)
+        return len(rows)
 
     def copy_person(self, idx):
         r, kind = self._row(idx)

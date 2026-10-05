@@ -334,27 +334,88 @@ def open_chrome_window():
         return False, str(e)
 
 
-def fill_result(ic, name, day):
-    """일일실적 점검의 [실적 넣기]: 그날 실적 없는 지난 일정에 실적을 넣는다. → (성공 여부, 문구)"""
-    import goodeos_work as g
+def _fill_one(page, dlg, offset, ic, name, day):
+    """실적 없는 지난 일정에 실적을 넣는다. → (성공 여부, 문구)"""
     import kakao
     import runner
-    from playwright.sync_api import sync_playwright
     try:
-        with sync_playwright() as pw:
-            page = get_page(pw)
-            dlg = g.Dialogs(page)
-            offset = g.server_offset(page)
-            it = kakao.Item(ic=ic, person=name, date=day, action="실적", source="일일실적 점검")
-            runner.run_item(page, dlg, it, lambda q, o: None, lambda m: None, now=datetime.now() + offset)
+        it = kakao.Item(ic=ic, person=name, date=day, action="실적", source="일일실적 점검")
+        runner.run_item(page, dlg, it, lambda q, o: None, lambda m: None, now=datetime.now() + offset)
         return True, f"{name} 어르신 실적을 넣었어요."
     except Exception as e:
         msg = str(e)
         if msg == "건너뜀":
             msg = "실적 없는 일정이 여러 개라 고를 수 없어요. 카톡 요청 처리에서 해 주세요."
         return False, msg
+
+
+def fill_result(ic, name, day):
+    """일일실적 점검의 [실적 넣기]: 그날 실적 없는 지난 일정에 실적을 넣는다. → (성공 여부, 문구)"""
+    import goodeos_work as g
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as pw:
+            page = get_page(pw)
+            return _fill_one(page, g.Dialogs(page), g.server_offset(page), ic, name, day)
+    except Exception as e:
+        return False, str(e)
     finally:
         schedule_chrome_close()
+
+
+FILL_PARALLEL = 3  # 동시에 여는 탭 수 (너무 많으면 goodeos 가 느려짐)
+
+
+def fill_results(rows, day, on_one, workers=FILL_PARALLEL):
+    """[모두 실적 넣기]: rows = [(번호, 생활지원사, 성명)] 을 탭을 나눠 동시에 넣는다. on_one(번호, 성공 여부, 문구).
+    실적 저장은 어르신별로 따로라서 동시에 해도 서로 덮어쓰지 않는다. (일정 저장은 달 전체를 보내므로 이렇게 하면 안 됨)"""
+    import queue
+    from concurrent.futures import ThreadPoolExecutor
+    import goodeos_work as g
+    from playwright.sync_api import sync_playwright
+    try:
+        with sync_playwright() as pw:
+            get_page(pw)  # 크롬 켜기·로그인 확인은 한 번만
+    except Exception as e:
+        for idx, _, _ in rows:
+            on_one(idx, False, str(e))
+        schedule_chrome_close()
+        return
+    todo = queue.Queue()
+    for r in rows:
+        todo.put(r)
+
+    def worker():
+        try:
+            with sync_playwright() as pw:
+                page = pw.chromium.connect_over_cdp(CDP_URL).contexts[0].new_page()
+                try:
+                    page.on("dialog", lambda d: d.accept())
+                    page.goto(SITE + "/main/main.php")
+                    page.wait_for_load_state()
+                    close_notices(page)
+                    dlg, offset = g.Dialogs(page), g.server_offset(page)
+                    while True:
+                        try:
+                            idx, ic, name = todo.get_nowait()
+                        except queue.Empty:
+                            return
+                        on_one(idx, *_fill_one(page, dlg, offset, ic, name, day))
+                finally:
+                    try:
+                        page.close()
+                    except Exception:
+                        pass
+        except Exception:
+            pass  # 이 탭이 못 열렸으면 남은 사람은 다른 탭이 맡는다
+
+    with ThreadPoolExecutor(max_workers=max(1, min(workers, len(rows)))) as ex:
+        for _ in range(max(1, min(workers, len(rows)))):
+            ex.submit(worker)
+    while not todo.empty():  # 모든 탭이 실패한 경우
+        idx, _, _ = todo.get_nowait()
+        on_one(idx, False, "탭을 열지 못했어요. 다시 시도해 주세요.")
+    schedule_chrome_close()
 
 
 CHROME_IDLE_SEC = 300  # 백그라운드 크롬을 이만큼 안 쓰면 끈다 (계속 켜 두면 PC가 느려짐)

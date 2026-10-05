@@ -185,7 +185,7 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
         <div class="mc" id="mcMissing"><div class="l">실적 미입력</div><div class="n" id="mMissing">-</div></div>
         <div class="mc"><div class="l">장기부재 실적</div><div class="n" id="mAbsentReg">-</div></div>
       </div>
-      <div class="list-head"><b id="listTitle">실적 확인이 필요한 사람</b><button class="small" id="copyAllBtn">전체 복사</button></div>
+      <div class="list-head"><b id="listTitle">실적 확인이 필요한 사람</b><span><button class="small" id="fillAllBtn" style="display:none">모두 실적 넣기</button> <button class="small" id="copyAllBtn">전체 복사</button></span></div>
       <div class="box" style="flex:1"><div class="scroll" id="plist"><div class="empty">점검을 시작하면 여기에 결과가 나와요.</div></div></div>
     </section>
 
@@ -301,8 +301,9 @@ function personRow(r){
   const tag = r.kind==="missing" ? '<span class="badge b-err" id="tag'+r.idx+'">미입력</span>'
                                  : '<span class="badge b-err">장기부재 실적</span>';
   const fill = r.kind==="missing" ? '<span class="lnk" id="fill'+r.idx+'" onclick="fill('+r.idx+')">실적 넣기</span>' : '';
+  const why = r.kind==='missing' ? '<span class="info" id="why'+r.idx+'" style="color:var(--text-danger)"></span>' : '';
   return '<div class="prow"><span class="nm">'+esc(r.name)+'</span><span class="info">담당 '+esc(r.ic)+' · '+esc(r.phone)+'</span>'
-       + tag + fill + '<span class="lnk" onclick="copyPerson('+r.idx+')">복사</span></div>';
+       + tag + fill + '<span class="lnk" onclick="copyPerson('+r.idx+')">복사</span>' + why + '</div>';
 }
 $("checkBtn").onclick = async () => {
   const err = await api.check();
@@ -310,6 +311,13 @@ $("checkBtn").onclick = async () => {
   $("checkBtn").disabled = true; setProg(2, "점검을 시작해요...");
 };
 $("copyAllBtn").onclick = async () => toast(await api.copy_all());
+$("fillAllBtn").onclick = async () => {
+  const n = await api.fill_all();
+  if(typeof n === "string"){ toast(n); return; }
+  $("fillAllBtn").disabled = true; setProg(null, n+"명에게 실적을 넣는 중이에요 (3명씩 동시에)...");
+  document.querySelectorAll("[id^=fill]:not(#fillAllBtn)").forEach(el=>{ if(el.classList.contains("lnk")){ el.textContent="처리 중..."; el.classList.add("off"); } });
+  document.querySelectorAll("[id^=why]").forEach(el=>el.textContent="");
+};
 async function copyPerson(i){ toast(await api.copy_person(i)); }
 async function fill(i){
   const el=$("fill"+i); if(el.classList.contains("off")) return;
@@ -455,15 +463,20 @@ window.App = { on(ev, d){
       $("mUsers").textContent=d.users; $("mAbsent").textContent=d.absent; $("mMissing").textContent=d.missing; $("mAbsentReg").textContent=d.absentReg;
       $("mcMissing").classList.toggle("hot", d.missing>0);
       $("listTitle").textContent = "실적 확인이 필요한 사람 ("+d.rows.length+"명)";
+      $("fillAllBtn").style.display = d.missing>0 ? "" : "none";
       $("plist").innerHTML = d.rows.length ? d.rows.map(personRow).join("") :
         '<div class="empty good">모든 이용자에게 실적이 들어가 있고, 장기부재자 실적도 없어요.</div>';
       refreshStatus(); break; }
     case "check_error": $("checkBtn").disabled=false; setProg(0, d, true); break;
     case "fill_done": {
       const el=$("fill"+d.idx);
-      if(d.ok){ const t=$("tag"+d.idx); t.textContent="실적 넣음"; t.className="badge b-ok"; el.remove(); toast(d.msg); }
-      else { el.textContent="다시 시도"; el.classList.remove("off"); setProg(null, d.msg, true); }
+      if(d.ok){ const t=$("tag"+d.idx); t.textContent="실적 넣음"; t.className="badge b-ok"; if(el) el.remove(); if(!d.quiet) toast(d.msg); }
+      else { if(el){ el.textContent="다시 시도"; el.classList.remove("off"); } if(d.quiet){ const w=$("why"+d.idx); if(w) w.textContent=d.msg; } else setProg(null, d.msg, true); }
       break; }
+    case "fill_all_done":
+      $("fillAllBtn").disabled=false;
+      setProg(null, "실적 넣기가 끝났어요: "+d.total+"명 중 "+d.ok+"명 성공"+(d.ok<d.total ? " · 못 넣은 "+(d.total-d.ok)+"명은 이유를 확인해 주세요" : ""), d.ok<d.total);
+      break;
     case "k_status": $("kStatus").textContent=d; break;
     case "k_row": kRow(d); break;
     case "k_log": { const l=$("klog"); l.textContent += (l.textContent?"\n":"")+d; l.scrollTop=l.scrollHeight; break; }

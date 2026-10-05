@@ -434,8 +434,11 @@ class Interpreter:
         for s, e, a, b in times:
             n = same_line_name(s, e) or before(names, s) or next(((p, x) for p, x in names if p > s), None)
             dd = before(dates, s) or (dates[0] if dates else None)
+            kind = kind_near(s, e)
+            if not kind and int(b[:2]) * 60 + int(b[2:]) - int(a[:2]) * 60 - int(a[2:]) == 1:
+                kind = "전화"  # 1분짜리 일정은 전화 안부 (서비스를 안 적어도)
             it = Item(ic=ic, person=n[1] if n else "", date=dd[1] if dd else msg_date, frm=a, to=b,
-                      kind=kind_near(s, e), source=body)
+                      kind=kind, source=body)
             it.pos = s
             items.append(it)
         timed_names = {x.person for x in items}
