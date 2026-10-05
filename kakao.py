@@ -511,11 +511,15 @@ class Interpreter:
         if answer.strip() in options:
             return answer.strip(), 1.0
         opts = dict(options)
-        opts["unclear"] = "The answer does not clearly pick one option"
-        c, conf, _, _ = jev.choice({"question": question, "options": list(options), "answer": answer},
-                                   "The staff member answered `question` with `answer` (Korean, may be casual, "
-                                   "phonetic like 에이/비, or have typos). Which option does it select?", opts)
-        if c == "unclear" or conf < CONF_OK:
+        opts["none"] = "No option fits: off-topic, not offered, or equally ambiguous between options"
+        # 보기의 설명도 같이 보내야 '41년생', '지워' 처럼 설명에 있는 말로 답해도 알아듣는다
+        c, conf, _, _ = jev.choice({"question": question, "options": dict(options), "answer": answer},
+                                   "The staff member answered `question` with `answer` (Korean, casual, may use phonetic "
+                                   "spelling, abbreviations or typos). `options` maps each option key to its meaning. "
+                                   "Pick the option the answer means; an answer that clearly means one of the options in "
+                                   "other words counts. Choose `none` ONLY if the answer is off-topic, asks for something "
+                                   "that is not among the options, or fits two options equally well.", opts)
+        if c == "none" or conf < CONF_OK:
             return None, conf
         return c, conf
 
