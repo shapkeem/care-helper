@@ -931,6 +931,27 @@ def cleanup_old_update_files():
                 f.unlink()
         except OSError:
             pass
+    _cleanup_old_unpacked()
+
+
+def _cleanup_old_unpacked():
+    """Nuitka 단일 파일은 버전마다 LOCALAPPDATA 의 CareHelper/<버전> 폴더에 풀린다. 지금 버전이 아닌 폴더는 지운다."""
+    if "__compiled__" not in globals():
+        return
+    import shutil
+    here = os.path.normcase(os.path.abspath(os.path.dirname(__file__)))
+    root = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CareHelper")
+    try:
+        names = os.listdir(root)
+    except OSError:
+        return
+    for name in names:
+        d = os.path.join(root, name)
+        if not re.fullmatch(r"[\d.]+", name) or not os.path.isdir(d):
+            continue  # 버전 이름 폴더만
+        if here.startswith(os.path.normcase(os.path.abspath(d))):
+            continue  # 지금 쓰는 폴더
+        shutil.rmtree(d, ignore_errors=True)
 
 
 def update_error_text(err):
@@ -986,7 +1007,8 @@ def download_and_install_update(info, on_progress=None):
     else:
         _install_in_place(exe, new, old)
     # 지금 프로그램이 받은 실행 환경(PyInstaller·Nuitka 내부 값)을 새 프로그램에 넘기지 않는다
-    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("NUITKA", "_MEI", "_PYI"))}
+    env = {k: v for k, v in os.environ.items()
+           if not k.upper().startswith(("NUITKA_ONEFILE", "_MEI", "_PYI"))}
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     subprocess.Popen([str(exe)], cwd=str(exe.parent), env=env, close_fds=True)
     return relocate
@@ -1550,7 +1572,8 @@ def main_gui():
 
 if __name__ == "__main__":
     if "--cli" in sys.argv:
-        if sys.stdout is None:  # 창 없는 exe 로 시험할 때는 파일로 남김
+        # 창 없는 exe 로 시험할 때는 파일로 남김 (PyInstaller 는 stdout 이 None, Nuitka 는 NUL 로 연결됨)
+        if sys.stdout is None or IS_EXE:
             sys.stdout = open(os.path.join(WORK_DIR, "cli_log.txt"), "w", encoding="utf-8")
         try:
             print(run_daily_check(print)["report"])
@@ -1563,13 +1586,29 @@ if __name__ == "__main__":
         started = False
         try:  # 빌드할 때 화면 방식을 정해 넣을 수 있다 (Nuitka 시험판은 tkinter 화면이 기본)
             import _build_flags
-            if getattr(_build_flags, "UI", "") == "tk" and "--web" not in sys.argv:
+            if getattr(_build_flags, "UI", "") == "tk" and not ({"--web", "--classic"} & set(sys.argv)):
                 sys.argv.append("--tk")
         except ImportError:
             pass
         if "--tk" in sys.argv:  # WebView 없이 tkinter 로 그린 새 화면
-            import tkui
-            started = tkui.start(sys.modules[__name__])
+            try:
+                import tkui
+                started = tkui.start(sys.modules[__name__])
+            except Exception:
+                # 새 화면이 켜지다 실패해도 프로그램은 켜지게: 오류는 파일로 남기고 기본 화면으로
+                try:
+                    os.makedirs(APP_DATA_DIR, exist_ok=True)
+                    with open(os.path.join(APP_DATA_DIR, "화면오류.log"), "w", encoding="utf-8") as f:
+                        f.write(traceback.format_exc())
+                except OSError:
+                    pass
+                try:  # 반쯤 만들어진 창이 남지 않게
+                    import tkinter
+                    if tkinter._default_root is not None:
+                        tkinter._default_root.destroy()
+                except Exception:
+                    pass
+                started = False
         if not started and "--classic" not in sys.argv and "--tk" not in sys.argv:  # 웹 화면(WebView2)을 쓸 수 없으면 기본 화면으로
             try:
                 import webui
