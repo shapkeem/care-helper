@@ -23,15 +23,26 @@ jobs:
         with:
           python-version: "3.12"
       - name: 패키지 설치
-        run: pip install pyinstaller playwright pywebview openpyxl xlrd
-      - name: exe 빌드
+        run: pip install nuitka ordered-set zstandard playwright openpyxl xlrd
+      - name: exe 빌드 (Nuitka, tkinter 화면)
         shell: pwsh
         run: |
           $ver = (Select-String -Path "맞춤돌봄도우미.py" -Pattern '^APP_VERSION = "(.+)"').Matches[0].Groups[1].Value
           echo "VER=$ver" >> $env:GITHUB_ENV
-          pyinstaller --onefile --windowed --noconfirm --icon icon.ico --add-data "icon.ico;." --add-data "ui;ui" `
-            --collect-all webview --hidden-import webui --hidden-import kakao_ui --hidden-import plan_converter --hidden-import scare_plan `
-            --name "CareHelper-$ver" "맞춤돌봄도우미.py"
+          Set-Content -Path _build_flags.py -Value 'UI = "tk"' -Encoding utf8
+          $drv = python -c "import playwright, os; print(os.path.join(os.path.dirname(playwright.__file__), 'driver'))"
+          python -m nuitka --onefile --assume-yes-for-downloads --msvc=latest --jobs=2 --low-memory `
+            --windows-console-mode=disable --windows-icon-from-ico=icon.ico `
+            --company-name=CareHelper --product-name=CareHelper --file-description=CareHelper `
+            --file-version=$ver --product-version=$ver `
+            --onefile-tempdir-spec="{CACHE_DIR}/CareHelper/{VERSION}" `
+            --include-data-files=icon.ico=icon.ico `
+            --include-module=_build_flags --include-module=tkui --include-module=webui --include-module=kakao_ui --include-module=plan_converter --include-module=scare_plan `
+            --include-module=kakao --include-module=kakao_job --include-module=runner --include-module=goodeos_work --include-module=jev `
+            --include-package=playwright --include-data-dir="$drv=playwright/driver" `
+            --enable-plugin=tk-inter --nofollow-import-to=webview --nofollow-import-to=playwright.async_api `
+            --output-dir=dist --output-filename="CareHelper-$ver.exe" `
+            "맞춤돌봄도우미.py"
       - uses: actions/upload-artifact@v4
         with:
           name: CareHelper-${{ env.VER }}

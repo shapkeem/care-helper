@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "2.0.5"
+APP_VERSION = "2.0.6"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -985,7 +985,8 @@ def download_and_install_update(info, on_progress=None):
         exe = USER_INSTALL_EXE
     else:
         _install_in_place(exe, new, old)
-    env = os.environ.copy()
+    # 지금 프로그램이 받은 실행 환경(PyInstaller·Nuitka 내부 값)을 새 프로그램에 넘기지 않는다
+    env = {k: v for k, v in os.environ.items() if not k.upper().startswith(("NUITKA", "_MEI", "_PYI"))}
     env["PYINSTALLER_RESET_ENVIRONMENT"] = "1"
     subprocess.Popen([str(exe)], cwd=str(exe.parent), env=env, close_fds=True)
     return relocate
