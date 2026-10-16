@@ -528,7 +528,7 @@ class Api:
             return "새 버전 정보가 없어요."
         if self._busy["v"]:
             return "작업이 끝난 뒤에 업데이트해 주세요."
-        if not getattr(sys, "frozen", False) or not info.get("asset_url"):
+        if not self._app.IS_EXE or not info.get("asset_url"):
             import webbrowser
             webbrowser.open(info["page_url"])
             return "다운로드 페이지를 열었어요."

@@ -27,7 +27,11 @@ APP_VERSION = "2.0.5"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
-WORK_DIR = os.path.dirname(os.path.abspath(sys.executable if getattr(sys, "frozen", False) else __file__))
+# exe 로 실행 중인지: PyInstaller 는 sys.frozen, Nuitka 는 __compiled__ 로 알 수 있다
+IS_EXE = bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
+# exe 파일 경로: Nuitka 단일 파일은 sys.executable 이 임시 폴더를 가리킬 수 있어 sys.argv[0] 을 쓴다
+EXE_PATH = (os.path.abspath(sys.argv[0]) if "__compiled__" in globals() else sys.executable) if IS_EXE else None
+WORK_DIR = os.path.dirname(EXE_PATH if IS_EXE else os.path.abspath(__file__))
 APP_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME)
 PROFILE_DIR = os.path.join(APP_DATA_DIR, "chrome_profile")
 CRED_PATH = os.path.join(APP_DATA_DIR, "login.dat")
@@ -825,7 +829,7 @@ def fetch_latest_release():
 
 
 def _update_paths():
-    exe = Path(sys.executable)
+    exe = Path(EXE_PATH or sys.executable)
     return exe, exe.with_name(exe.stem + ".new.exe"), exe.with_name(exe.stem + ".old.exe")
 
 
@@ -866,7 +870,7 @@ def _make_desktop_shortcut(target):
 
 
 def cleanup_old_update_files():
-    if not getattr(sys, "frozen", False):
+    if not IS_EXE:
         return
     exe, new, _old = _update_paths()
     for f in [new] + list(exe.parent.glob(exe.stem + ".old*.exe")):
@@ -1434,7 +1438,7 @@ def main_gui():
         if busy["v"]:
             messagebox.showinfo("업데이트", "점검이 끝난 뒤에 업데이트해 주세요.")
             return
-        if not getattr(sys, "frozen", False) or not info.get("asset_url"):
+        if not IS_EXE or not info.get("asset_url"):
             if messagebox.askyesno("업데이트", f"새 버전 v{info['version']}이(가) 있습니다.\n다운로드 페이지를 열까요?"):
                 import webbrowser
                 webbrowser.open(info["page_url"])
