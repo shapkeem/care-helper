@@ -476,6 +476,12 @@ SERVICE_CODES = {
     "CA101": "기타 서비스 연계",
 }
 
+PHONE_CODES = {"19101", "12101", "12201", "12301", "12401", "12606", "15101", "C1101", "C5101"}
+MIN_MINUTES = 10  # 전화가 아닌 일정(방문 등)은 10분 이상
+EDU_CODES = {"34202": "인지활동프로그램", "33303": "건강교육", "33101": "영양교육", "33202": "보건교육"}
+EDU_MIN_MINUTES = 19
+DEFAULT_WORKER_GENDER = "여"  # goodeos 명단에 성별이 비어 있을 때
+
 STANDARD_HEADERS = [
     "서비스일자", "계획 시작시간", "계획 종료시간", "실적 시작시간", "실적 종료시간",
     "대상자명", "대상자 생년월일", "대상자 성별",
@@ -781,8 +787,9 @@ class FixProposal:
     _next_id = [0]
 
     def __init__(self, kind, file_label, row_label, person, current_disp, suggested_disp,
-                 reason, cells, value_builder):
+                 reason, cells, value_builder, auto=False):
         FixProposal._next_id[0] += 1
+        self.auto = auto  # True 면 검토 창에 띄우지 않고 바로 적용
         self.pid = FixProposal._next_id[0]
         self.kind = kind
         self.file_label = file_label
@@ -903,6 +910,7 @@ class FileJob:
         self.auto_fixes = []
         self.load_error = None
         self.dropped_rows = {}
+        self.genderless_workers = set()
 
     @property
     def worker_name(self):
@@ -937,6 +945,18 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
         rlabel = row_nums[i]
         person = _norm_str(row[COL_NAME])
 
+        # 실적 칸에 넣어 둔 '종료-시작' 계산값(=C2-B2)은 업로드 전에 지운다
+        s_raw, e_raw = normalize_time_value(row[COL_START]), normalize_time_value(row[COL_END])
+        for col in (COL_A_START, COL_A_END):
+            v = row[col]
+            if _is_blank(v):
+                continue
+            is_formula = isinstance(v, str) and v.strip().startswith("=")
+            is_diff = (s_raw and e_raw and isinstance(v, (int, float)) and float(v) == int(e_raw) - int(s_raw))
+            if is_formula or is_diff:
+                row[col] = None
+                job.auto_fixes.append(f"{rlabel}행 실적 칸의 시간차 계산값 '{_display_value(v)}' 지움")
+
         for col, colname in ((COL_START, "계획 시작시간"), (COL_END, "계획 종료시간"),
                              (COL_A_START, "실적 시작시간"), (COL_A_END, "실적 종료시간")):
             v = row[col]
@@ -955,7 +975,7 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
                 job.proposals.append(FixProposal(
                     "시간형식", label, rlabel, person,
                     _display_value(v), t, f"{colname}을 4자리 형식으로 통일",
-                    [(i, col)], _single_time_builder,
+                    [(i, col)], _single_time_builder, auto=True,
                 ))
 
         for col, colname, builder in (
@@ -977,7 +997,7 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
                 job.proposals.append(FixProposal(
                     "시간형식", label, rlabel, person,
                     _display_value(v), str(d), f"{colname}을 숫자 형식으로 통일",
-                    [(i, col)], builder,
+                    [(i, col)], builder, auto=True,
                 ))
 
         v = row[COL_CODE]
@@ -986,7 +1006,7 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
             job.proposals.append(FixProposal(
                 "코드정리", label, rlabel, person,
                 repr(_display_value(v)), cleaned, "서비스코드의 공백/특수문자 제거",
-                [(i, COL_CODE)], _code_builder,
+                [(i, COL_CODE)], _code_builder, auto=True,
             ))
 
         vv = row[COL_VENDOR]
@@ -1007,14 +1027,19 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
         elif cleaned not in SERVICE_CODES:
             job.errors.append(f"{rlabel}행 서비스코드 '{cleaned}' 코드표에 없음")
 
-        if cleaned == "1A102":
+        if cleaned and cleaned not in PHONE_CODES:
             s = normalize_time_value(row[COL_START])
             e = normalize_time_value(row[COL_END])
             if s is not None and e is not None:
                 duration = time_to_minutes(e) - time_to_minutes(s)
-                if 0 < duration <= 9:
+                kind_name = SERVICE_CODES.get(cleaned, cleaned)
+                if 0 < duration < MIN_MINUTES:
                     job.dropped_rows[i] = (
-                        f"{rlabel}행 {person} 서비스코드 1A102(방문)인데 계획시간이 {duration}분으로 9분 이하임")
+                        f"{rlabel}행 {person} {cleaned}({kind_name}) 계획시간이 {duration}분으로 {MIN_MINUTES}분 미만임")
+                elif cleaned in EDU_CODES and 0 < duration < EDU_MIN_MINUTES:
+                    job.errors.append(
+                        f"{rlabel}행 {person} {cleaned}({EDU_CODES[cleaned]}) 계획시간이 {duration}분으로 "
+                        f"{EDU_MIN_MINUTES}분 미만임")
 
     if silent_count:
         job.auto_fixes.append(f"표시가 같은 저장 형식 통일 {silent_count}건 자동 적용")
@@ -1057,7 +1082,7 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
             job.proposals.append(FixProposal(
                 "날짜", label, rlabel, person,
                 str(n), str(fixed), why,
-                [(i, COL_DATE)], _date_builder,
+                [(i, COL_DATE)], _date_builder, auto=True,
             ))
             parsed_dates[i] = (fixed, fixed_dt)
 
@@ -1246,6 +1271,19 @@ def _cross_check_workers(job: FileJob, worker_data):
             job.auto_fixes.append(
                 f"{rlabel}행 {name} 생활지원사 생년월일 {old_disp}→{known_birth} (지원사 명단 기준)")
 
+        if not isinstance(known, dict) or "gender" not in known:
+            continue
+        cur_gender = _norm_str(row[COL_WORKER_GENDER])
+        want = known["gender"] or DEFAULT_WORKER_GENDER
+        if cur_gender != want:
+            grid[i][COL_WORKER_GENDER] = want
+            src = "지원사 명단 기준" if known["gender"] else f"goodeos에 성별이 없어 '{want}'로 넣음"
+            job.auto_fixes.append(
+                f"{rlabel}행 {name} 생활지원사 성별 {cur_gender or '빈칸'}→{want} ({src})")
+        if not known["gender"] and name not in job.genderless_workers:
+            job.genderless_workers.add(name)
+            job.warnings.append(f"생활지원사 '{name}' 성별이 goodeos에 없어 '{want}'로 넣었어요. 남자면 goodeos에서 성별을 넣어 주세요")
+
 
 def send_to_recycle_bin(paths):
     import ctypes
@@ -1328,6 +1366,36 @@ def merge_converted_files(target_folder: Path, log=None):
     merged_wb.save(out_path)
     _log(f"{out_path.name} 저장 완료 (총 {out_row - 1}행)")
     return out_path
+
+
+UPLOADED_MARK = "(업로드완료)"
+
+
+def find_upload_file(target_folder: Path):
+    """올릴 파일: 가장 최근 통합본. 변환 파일이 하나뿐이라 통합본이 없으면 그 파일.
+    이미 올린 파일(이름에 '(업로드완료)')과 오류 파일은 고르지 않는다. 없으면 None."""
+    files = [f for f in target_folder.glob("*.xlsx")
+             if not f.name.startswith("~$") and UPLOADED_MARK not in f.stem and not f.stem.startswith(ERROR_FILE_PREFIX)]
+    merged = [f for f in files if f.stem.startswith(MERGED_FILE_BASE_NAME)]
+    if merged:
+        return max(merged, key=lambda f: f.stat().st_mtime)
+    return files[0] if len(files) == 1 else None
+
+
+def count_data_rows(path: Path):
+    ws = openpyxl.load_workbook(_read_bytes_io(path), data_only=True, read_only=True).active
+    return sum(1 for r in ws.iter_rows(min_row=2, values_only=True) if any(v not in (None, "") for v in r))
+
+
+def mark_uploaded(path: Path):
+    """다시 올려 일정이 중복되지 않게 이름에 '(업로드완료)'를 붙인다. → 새 경로"""
+    new = path.with_name(f"{path.stem}{UPLOADED_MARK}{path.suffix}")
+    n = 2
+    while new.exists():
+        new = path.with_name(f"{path.stem}{UPLOADED_MARK}({n}){path.suffix}")
+        n += 1
+    path.rename(new)
+    return new
 
 
 def _data_date_range(job: FileJob):
@@ -1454,13 +1522,15 @@ def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_
                 on_progress(i + 1, total)
 
     all_proposals = [p for job in jobs for p in job.proposals]
-    approved = {}
-    if all_proposals:
+    # 형식 통일·코드 정리·연도 보정은 사람이 볼 필요 없이 바로 적용한다
+    approved = {p.pid: p.suggested_disp for p in all_proposals if p.auto}
+    to_review = [p for p in all_proposals if not p.auto]
+    if to_review:
         log("")
-        log(f"승인이 필요한 수정 제안 {len(all_proposals)}건 발견 - 검토 창을 확인하세요.")
+        log(f"승인이 필요한 수정 제안 {len(to_review)}건 발견 - 검토 창을 확인하세요.")
         if review_callback is None:
             review_callback = auto_approve_all
-        approved = review_callback(all_proposals) or {}
+        approved.update(review_callback(to_review) or {})
 
     success_count = 0
     applied_count = 0
@@ -1489,7 +1559,8 @@ def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_
             for (r, c), v in zip(p.cells, values):
                 job.grid[r][c] = v
             applied_count += 1
-            log(f"  [수정] {p.row_label}행 {p.kind}: {p.current_disp} → {approved[p.pid]}")
+            tag = "자동수정" if p.auto else "수정"
+            log(f"  [{tag}] {p.row_label}행 {p.kind}: {p.current_disp} → {approved[p.pid]}")
 
         for msg in job.errors:
             log(f"  [오류] {msg}")

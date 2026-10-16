@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "2.0.3"
+APP_VERSION = "2.0.4"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -108,6 +108,12 @@ def _normal_user_agent(exe):
             f"(KHTML, like Gecko) Chrome/{ver} Safari/537.36")
 
 
+# 자동화에 필요 없는 확장 프로그램·동기화·번역 같은 크롬 부가 기능을 꺼서 메모리를 줄인다
+LIGHT_CHROME_ARGS = ["--disable-extensions", "--disable-component-extensions-with-background-pages",
+                     "--disable-background-networking", "--disable-sync", "--no-first-run",
+                     "--no-default-browser-check", "--disable-features=Translate,OptimizationHints,MediaRouter"]
+
+
 def open_chrome(hidden=False):
     """자동화용 크롬 실행 (이미 떠 있으면 아무것도 안 함). hidden=True 면 창 없이 백그라운드로."""
     if chrome_debug_alive():
@@ -116,7 +122,7 @@ def open_chrome(hidden=False):
     if not exe:
         raise RuntimeError("크롬(chrome.exe)을 찾을 수 없습니다.")
     os.makedirs(PROFILE_DIR, exist_ok=True)
-    args = [exe, "--remote-debugging-port=9222", f"--user-data-dir={PROFILE_DIR}"]
+    args = [exe, "--remote-debugging-port=9222", f"--user-data-dir={PROFILE_DIR}"] + LIGHT_CHROME_ARGS
     if hidden:
         args += ["--headless=new", "--window-size=1400,1000"]
         ua = _normal_user_agent(exe)

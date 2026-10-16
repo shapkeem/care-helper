@@ -67,7 +67,9 @@ def load_workers(app, page, today, log):
     path = _workers_path(today)
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
-            return json.load(f)
+            cached = json.load(f)
+        if all("gender" in v for v in cached.values()):  # 성별 없이 받은 예전 명단이면 새로 받는다
+            return cached
     os.makedirs(ROSTER_DIR, exist_ok=True)
     log("오늘 생활지원사 명단 받는 중...")
     workers = g.fetch_workers(page, today.year, today.month)

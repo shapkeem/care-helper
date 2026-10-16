@@ -213,7 +213,7 @@ input:focus,textarea:focus{border-color:var(--fill-accent);box-shadow:0 0 0 3px 
     <section class="page" id="p-conv">
       <div class="head">
         <div><div class="title">제공계획서 변환</div><div class="sub">바탕화면 '제공계획서 작업전' 엑셀을 정리·검사해서 '작업후' 폴더에 저장하고 통합본을 만들어요.</div></div>
-        <div class="actions"><button id="cOpenSrc">작업전 폴더</button><button id="cOpenDst">결과 폴더</button><button class="primary" id="cStart">변환 시작</button></div>
+        <div class="actions"><button id="cOpenSrc">작업전 폴더</button><button id="cOpenDst">결과 폴더</button><button class="primary" id="cStart">변환 시작</button><button class="primary" id="cUpload">goodeos 업로드</button></div>
       </div>
       <div class="metrics" style="grid-template-columns:repeat(3,minmax(0,1fr))">
         <div class="mc"><div class="l">작업전 파일</div><div class="n" id="cSrc">-</div></div>
@@ -374,6 +374,15 @@ $("cDel").onclick = async () => {
   if(!confirm("이번에 변환한 원본('작업전')과 결과('작업후', 통합본 포함)를 휴지통으로 보낼까요?\n(오류가 있던 파일은 남아요. 휴지통에서 되돌릴 수 있어요)")) return;
   const m = await api.conv_delete(); clog(m); toast(m); $("cDoneRow").style.display="none"; convRefresh();
 };
+$("cUpload").onclick = async () => {
+  const info = await api.conv_upload_info();
+  if(info.error){ toast(info.error); clog(info.error); return; }
+  if(!confirm("'"+info.file+"' ("+info.rows+"줄)을 goodeos 일정엑셀등록으로 올리고, 오류 없는 줄을 모두 일정등록할까요?\n\n오류 줄은 등록하지 않고 기록에 남겨요.\n이미 goodeos에 있는 일정이 들어 있으면 중복으로 저장되니 확인하고 눌러 주세요.")) return;
+  const e = await api.conv_upload(true);
+  if(e){ toast(e); return; }
+  $("cUpload").disabled=true; $("cStart").disabled=true;
+  $("cProgText").classList.remove("err"); $("cProgText").textContent="goodeos에 올리는 중... (서버가 느리면 몇 분 걸려요)";
+};
 $("cStart").onclick = async () => {
   const e = await api.conv_start();
   if(e){ $("cProgText").textContent=e; $("cProgText").classList.add("err"); return; }
@@ -503,6 +512,15 @@ window.App = { on(ev, d){
         if(d.deletable){ $("cDoneRow").style.display="flex"; $("cDoneText").textContent="변환이 끝났어요. 다 확인했으면 원본과 결과를 정리할 수 있어요."; }
       }
       convRefresh(); break;
+    case "conv_upload_done": {
+      $("cUpload").disabled=false; $("cStart").disabled=false;
+      let t, bad;
+      if(d.error){ t="업로드가 멈췄어요: "+d.error; bad=true; }
+      else if(d.saved){ t="업로드 완료: "+d.ok+"줄 일정등록"+(d.errors.length ? " · 오류 "+d.errors.length+"줄은 등록 안 함 (기록 확인)" : ""); bad=d.errors.length>0; }
+      else { t="등록할 줄이 없어요: 오류 "+d.errors.length+"줄 (기록 확인)"; bad=true; }
+      $("cProgText").textContent=t; $("cProgText").classList.toggle("err", bad);
+      if(!d.error && d.errors.length) alert("goodeos에서 오류가 난 줄이 "+d.errors.length+"개 있어요. 등록하지 않았어요.\n\n"+d.errors.slice(0,15).join("\n")+(d.errors.length>15?"\n...(기록에서 전체 확인)":""));
+      convRefresh(); break; }
     case "s_msg": scMsg(d.msg, !d.ok); break;
     case "s_log": { const l=$("sclog"); l.textContent += (l.textContent?"\n":"")+d; l.scrollTop=l.scrollHeight; break; }
     case "s_row": Object.assign(SC[d.i], {status:d.status, note:d.note}); scRender(); break;

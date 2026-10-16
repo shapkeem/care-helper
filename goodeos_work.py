@@ -289,7 +289,7 @@ def open_result(page, person, ic_name, year, month):
 
 def fetch_workers(page, year, month):
     """실적등록 화면의 전담사회복지사별 생활지원사 목록(읽기 전용)으로 생활지원사 명단을 만든다.
-    → {이름: {"birth": YYYYMMDD, "dong": "1동"}}"""
+    → {이름: {"birth": YYYYMMDD, "dong": "1동", "gender": "여"/"남"/""}}"""
     page.goto(RST_URL)
     page.wait_for_load_state()
     _settle(page)
@@ -300,7 +300,7 @@ def fetch_workers(page, year, month):
                                     data: {yymm: ym, sw_cd: o.value, tgt_name: '', gbn: '3'}});
             const list = (typeof r === 'string' ? JSON.parse(r) : r) || [];
             const dong = (o.text.match(/\\((\\d+동)\\)/) || [])[1] || '';
-            for (const e of list) out[e.name] = {birthday: e.birthday || '', dong: dong};
+            for (const e of list) out[e.name] = {birthday: e.birthday || '', dong: dong, gender: e.gender || ''};
         }
         return out;
     }""", f"{year}{month:02d}")
@@ -310,7 +310,8 @@ def fetch_workers(page, year, month):
         d = re.sub(r"\D", "", v.get("birthday", ""))  # '65.05.06' → 650506
         if len(d) == 6:
             century = 1900 if int(d[:2]) > yy_now else 2000
-            workers[name.strip()] = {"birth": (century + int(d[:2])) * 10000 + int(d[2:]), "dong": v.get("dong", "")}
+            workers[name.strip()] = {"birth": (century + int(d[:2])) * 10000 + int(d[2:]), "dong": v.get("dong", ""),
+                                     "gender": (v.get("gender") or "").strip()}
     return workers
 
 
@@ -413,3 +414,49 @@ def do_modify(page, dlg, ic, old, new, log, now=None):
     """old/new: dict(person, date, frm, to, kind). 기존 것 지우고 새로 등록(지난 시간이면 실적까지)."""
     do_delete(page, dlg, ic, old["person"], old["date"], old["frm"], old["to"], log, old.get("kind"))
     return do_register(page, dlg, ic, new["person"], new["date"], new["frm"], new["to"], new["kind"], log, now)
+
+
+# ================================================================ 일정 엑셀 등록 (지원사별 일정등록 > 일정엑셀등록)
+def upload_plan_excel(page, dlg, path, log, save=True, save_timeout=900):
+    """엑셀을 올려 미리보기를 받고, 오류 없는 줄을 모두 골라 일정등록한다.
+    오류 줄(goodeos 가 체크박스를 주지 않는 줄)은 로그에 남기고 등록하지 않는다.
+    → {"total": 줄 수, "ok": 등록할 줄 수, "errors": [문구], "saved": 등록 여부}"""
+    page.goto(PLAN_URL)
+    page.wait_for_load_state()
+    _settle(page)
+    page.evaluate("() => ExcelReg()")
+    page.wait_for_selector("#DIV_LAYER #file_name", timeout=30000)
+    page.set_input_files("#DIV_LAYER #file_name", str(path))
+    log("엑셀을 올리는 중... (줄이 많으면 오래 걸려요)")
+    page.evaluate("() => fileUpload()")
+    page.wait_for_function("() => document.querySelectorAll('#DIV_LAYER #TBL_LIST tbody tr').length > 0",
+                           timeout=600000)
+    _settle(page, 500, timeout=60)
+    rows = page.evaluate("""() => [...document.querySelectorAll('#DIV_LAYER #TBL_LIST tbody tr')].map(tr => {
+        const c = [...tr.cells].map(x => x.innerText.trim());
+        return {ok: !!tr.querySelector('input[id^=chk_]'), date: c[1], time: c[2], person: c[6], worker: c[7],
+                svc: c[8], why: c[c.length - 1]};
+    })""")
+    errors = [f"{r['worker']} · {r['person']} {r['date']} {r['time']} {r['svc']}: {r['why'] or '등록 불가'}"
+              for r in rows if not r["ok"]]
+    ok = sum(1 for r in rows if r["ok"])
+    result = {"total": len(rows), "ok": ok, "errors": errors, "saved": False}
+    log(f"미리보기: 전체 {len(rows)}줄 · 등록 가능 {ok}줄 · 오류 {len(errors)}줄")
+    for e in errors:
+        log(f"  [업로드 오류] {e}")
+    if not save or ok == 0:
+        page.evaluate("() => { $('#DIV_LAYER').html('').parent().hide(); }")
+        return result
+    page.locator("#DIV_LAYER #chkAll").check()  # 일자 왼쪽 전체선택 (오류 줄은 체크박스가 없어 빠진다)
+    n = page.evaluate("() => document.querySelectorAll('#DIV_LAYER input[id^=chk_]:checked').length")
+    if n != ok:
+        raise WorkError(f"전체선택이 제대로 되지 않았어요 ({ok}줄 중 {n}줄 선택). 등록하지 않고 멈췄어요.")
+    log(f"{ok}줄 일정등록 중... (서버가 느리면 몇 분 걸릴 수 있어요)")
+    m = dlg.mark()
+    page.evaluate("() => ExcelSave()")
+    if not dlg.wait_for(m, "정상적으로 처리되었습니다", timeout=save_timeout):
+        raise WorkError("일정등록 결과를 확인하지 못했어요: " + (" / ".join(dlg.since(m)) or "응답 없음")
+                        + " — goodeos에서 등록됐는지 확인한 뒤 다시 올려 주세요 (다시 올리면 중복될 수 있어요)")
+    result["saved"] = True
+    log(f"일정등록 완료: {ok}줄")
+    return result

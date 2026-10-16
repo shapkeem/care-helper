@@ -375,6 +375,50 @@ class Api:
         self._conv_del = ([], [])
         return "원본과 변환 결과를 휴지통으로 보냈어요. (휴지통에서 되돌릴 수 있어요)"
 
+    def conv_upload_info(self):
+        """올릴 파일 이름과 줄 수 (확인 창에 보여 줄 것)."""
+        import plan_converter as pc
+        _src, dst = pc.work_folders()
+        f = pc.find_upload_file(dst)
+        if f is None:
+            return {"error": "올릴 통합본이 없어요. 먼저 변환을 해 주세요. (이미 올린 파일은 이름에 '(업로드완료)'가 붙어 있어요)"}
+        return {"file": f.name, "rows": pc.count_data_rows(f)}
+
+    def conv_upload(self, save=True):
+        if self._busy["v"]:
+            return "다른 작업이 진행 중이에요."
+        import plan_converter as pc
+        _src, dst = pc.work_folders()
+        f = pc.find_upload_file(dst)
+        if f is None:
+            return "올릴 통합본이 없어요."
+        self._busy["v"] = True
+
+        def work():
+            import goodeos_work as g
+            from playwright.sync_api import sync_playwright
+            log = lambda m: self._emit("conv_log", m)
+            try:
+                log("")
+                log(f"goodeos 업로드: {f.name}")
+                with sync_playwright() as pw:
+                    page = self._app.get_page(pw)
+                    res = g.upload_plan_excel(page, g.Dialogs(page), f, log, save=bool(save))
+                if res["saved"]:
+                    new = pc.mark_uploaded(f)
+                    src, out = getattr(self, "_conv_del", ([], []))
+                    self._conv_del = (src, [new if o == f else o for o in out])
+                    log(f"파일 이름을 '{new.name}'(으)로 바꿨어요. 같은 파일을 다시 올리지 않게요.")
+                self._emit("conv_upload_done", res)
+            except Exception as e:
+                log(f"[오류] 업로드: {e}")
+                self._emit("conv_upload_done", {"error": str(e)})
+            finally:
+                self._busy["v"] = False
+                self._app.schedule_chrome_close()
+        self._thread(work)
+        return None
+
     def conv_clear_leftovers(self):
         import plan_converter as pc
         _src, dst = pc.work_folders()
