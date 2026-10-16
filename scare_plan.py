@@ -420,15 +420,13 @@ def run(app, people, planner_name, other, on_row, log, save=True):
 
     with ThreadPoolExecutor(max_workers=PARALLEL) as ex:
         kept = sum(ex.map(work, range(len(people))))
-    # 다 끝나면 크롬을 끈다 (켜 두면 PC가 무거워짐). 사람이 봐야 할 탭이 남아 있으면 그대로 둔다.
+    # 다 끝나면 로그인된 s-care 탭 하나만 남기고 나머지 탭은 닫는다 (다시 로그인하지 않아도 되게).
+    # 사람이 봐야 할 탭이 남아 있으면 그대로 둔다.
     if kept:
-        log(f"확인할 탭 {kept}개를 크롬에 열어 뒀어요. 다 보면 크롬을 닫아 주세요.")
+        log(f"확인할 탭 {kept}개를 크롬에 열어 뒀어요. 다 보면 그 탭을 닫아 주세요.")
     else:
-        try:
-            close_chrome()
-            log("작업이 끝나서 크롬을 닫았어요.")
-        except Exception:
-            pass
+        app.trim_tabs(CDP, keep_host="s-care.mohw.go.kr")
+        log("작업이 끝나서 s-care 탭 하나만 남기고 정리했어요.")
 
 
 def parse_people(text, default_group):

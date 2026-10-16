@@ -442,7 +442,37 @@ def cancel_chrome_close():
         _idle["timer"] = None
 
 
+def trim_tabs(cdp_url=None, keep_host="goodeos.co.kr"):
+    """작업이 끝나면 로그인된 탭 하나만 남기고 나머지 탭(동시 처리용으로 연 탭 등)을 닫아 메모리를 줄인다."""
+    from playwright.sync_api import sync_playwright
+    cdp_url = cdp_url or CDP_URL
+    try:
+        with sync_playwright() as pw:
+            ctx = pw.chromium.connect_over_cdp(cdp_url).contexts[0]
+            ctx.on("dialog", lambda d: None)
+            pages = list(ctx.pages)
+            keep = next((p for p in pages if keep_host in (p.url or "")), pages[0] if pages else None)
+            for p in pages:
+                if p is not keep:
+                    try:
+                        p.close()
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+
 def schedule_chrome_close():
+    # 남은 탭 정리는 따로 돌린다 (부른 쪽의 playwright 연결과 섞이지 않게)
+    def later():
+        time.sleep(1)
+        if not _idle["busy"]() and chrome_debug_alive():  # 다음 작업이 이미 시작했으면 그 탭을 닫지 않게
+            trim_tabs()
+    threading.Thread(target=later, daemon=True).start()
+    _schedule_idle_close()
+
+
+def _schedule_idle_close():
     """작업이 끝나면 부른다. 5분 동안 다음 작업이 없으면 백그라운드 크롬을 끈다.
     그 사이에 작업을 하면 크롬 켜기·로그인을 건너뛰어 빨라진다."""
     cancel_chrome_close()
@@ -450,7 +480,7 @@ def schedule_chrome_close():
     def fire():
         _idle["timer"] = None
         if _idle["busy"]():
-            schedule_chrome_close()
+            _schedule_idle_close()
             return
         try:
             if chrome_mode() == "hidden":
@@ -737,6 +767,23 @@ def check_status_all():
     return goodeos, scare
 
 
+def in_new_tab(fn):
+    """goodeos 크롬에 탭을 하나 더 열어 fn(탭) 을 하고 닫는다. 여러 일을 동시에 할 때 쓴다 (스레드마다 따로 연결)."""
+    from playwright.sync_api import sync_playwright
+    with sync_playwright() as pw:
+        ctx = pw.chromium.connect_over_cdp(CDP_URL).contexts[0]
+        ctx.on("dialog", lambda d: None)  # 다른 탭의 알림창을 이 연결이 자동 취소하지 않게
+        page = ctx.new_page()
+        page.on("dialog", lambda d: d.accept())
+        try:
+            return fn(page)
+        finally:
+            try:
+                page.close()
+            except Exception:
+                pass
+
+
 def run_daily_check(log, progress=lambda pct, msg: None):
     import tempfile
     from playwright.sync_api import sync_playwright
@@ -749,20 +796,25 @@ def run_daily_check(log, progress=lambda pct, msg: None):
             import goodeos_work  # 날짜는 PC 시계 말고 goodeos 서버 날짜로
             day = (datetime.now() + goodeos_work.server_offset(page)).date()
             log("로그인 확인 완료, 공지 닫음")
-            progress(15, "이용자 명단 받는 중...")
-            log("이용자 명단 받는 중...")
-            for attempt in range(3):  # 서버가 가끔 빈 명단을 주면 다시 받는다 (이용자가 0명일 수는 없음)
-                if download_list(page, "10", users_path, log) and read_list(users_path):
-                    break
-                log("이용자 명단이 비어 있어 다시 받아요...")
-            else:
+            # 이용자 명단·장기부재 명단은 새 탭에서, 통계는 지금 탭에서 동시에 받는다
+            progress(15, "이용자·장기부재 명단과 통계를 동시에 받는 중...")
+            log("이용자 명단, 장기부재 명단, 통계(서비스현황 일별)를 동시에 받는 중...")
+
+            def get_users(tab):
+                for attempt in range(3):  # 서버가 가끔 빈 명단을 주면 다시 받는다 (이용자가 0명일 수는 없음)
+                    if download_list(tab, "10", users_path, log) and read_list(users_path):
+                        return True
+                    log("이용자 명단이 비어 있어 다시 받아요...")
                 raise RuntimeError("이용자 명단을 받지 못했습니다. (3번 받아도 비어 있음)")
-            progress(40, "장기부재 명단 받는 중...")
-            log("장기부재 명단 받는 중...")
-            has_absent = download_list(page, "01", absent_path, log)
-            progress(60, "통계(서비스현황 일별) 읽는 중...")
-            log("통계(서비스현황 일별) 읽는 중...")
-            service_people = collect_service_people(page, log, day)
+
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=2) as ex:
+                f_users = ex.submit(in_new_tab, get_users)
+                f_absent = ex.submit(in_new_tab, lambda tab: download_list(tab, "01", absent_path, log))
+                service_people = collect_service_people(page, log, day)
+                progress(70, "명단 받는 중...")
+                f_users.result()
+                has_absent = f_absent.result()
         progress(90, "명단 대조하는 중...")
         users_df = read_list(users_path)
         absent_df = read_list(absent_path) if has_absent else []

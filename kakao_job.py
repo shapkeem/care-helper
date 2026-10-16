@@ -157,8 +157,12 @@ def fetch_daily_lists(app, log):
         with sync_playwright() as pw:
             page = app.get_page(pw)
             today = (datetime.now() + g.server_offset(page)).date()
-            load_roster(app, page, today, log)
-            load_workers(app, page, today, log)
+            # 대상자 명단은 새 탭에서, 지원사 명단은 지금 탭에서 동시에 받는다
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=1) as ex:
+                f_roster = ex.submit(app.in_new_tab, lambda tab: load_roster(app, tab, today, log))
+                load_workers(app, page, today, log)
+                f_roster.result()
             return today
     finally:
         app.schedule_chrome_close()
