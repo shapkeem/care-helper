@@ -124,7 +124,8 @@ def open_chrome(hidden=False):
     os.makedirs(PROFILE_DIR, exist_ok=True)
     args = [exe, "--remote-debugging-port=9222", f"--user-data-dir={PROFILE_DIR}"] + LIGHT_CHROME_ARGS
     if hidden:
-        args += ["--headless=new", "--window-size=1400,1000"]
+        # 백그라운드 크롬은 사람이 안 보므로 그림을 받지 않는다 (크롬 자체 설정이라 사이트 오류 없음)
+        args += ["--headless=new", "--window-size=1400,1000", "--blink-settings=imagesEnabled=false"]
         ua = _normal_user_agent(exe)
         if ua:
             args.append(f"--user-agent={ua}")
@@ -525,14 +526,28 @@ def download_list(page, stat_code, dest, log):
     page.wait_for_load_state()
     close_notices(page)
     page.select_option("[name=cboStatGbn]", stat_code)
-    page.evaluate("lfSearch()")
-    _wait_settled(page)
-    try:
-        with page.expect_download(timeout=30000) as info:
-            page.evaluate("lfPrint()")
-    except Exception:
+    # 조회는 페이지를 새로 불러온다. 새 페이지가 다 뜨기 전에 출력하면 빈 명단이 받아지므로 끝까지 기다린다.
+    with page.expect_navigation(timeout=60000):
+        page.evaluate("() => setTimeout(lfSearch, 0)")
+    page.wait_for_load_state()
+    _wait_settled(page, 500)
+    if page.input_value("[name=cboStatGbn]") != stat_code:
+        page.select_option("[name=cboStatGbn]", stat_code)
+    # [출력](lfPrint)과 같은 요청을 페이지 안에서 직접 보내 내용을 받는다.
+    # 크롬 내려받기를 쓰면 같은 사이트에서 두 번째 파일부터 크롬이 막아 빈 파일(0바이트)이 저장됐다.
+    data = page.evaluate("""async () => {
+        const r = await fetch('../care/care_client_excel.php?sr=S', {method: 'POST', body: new FormData(document.f),
+                                                                      credentials: 'same-origin'});
+        if (!r.ok) return null;
+        const blob = await r.blob();
+        return await new Promise(res => { const fr = new FileReader();
+            fr.onload = () => res(String(fr.result).split(',')[1] || ''); fr.readAsDataURL(blob); });
+    }""")
+    if not data:
         return False
-    info.value.save_as(dest)
+    import base64
+    with open(dest, "wb") as fh:
+        fh.write(base64.b64decode(data))
     return True
 
 
@@ -732,8 +747,12 @@ def run_daily_check(log, progress=lambda pct, msg: None):
             log("로그인 확인 완료, 공지 닫음")
             progress(15, "이용자 명단 받는 중...")
             log("이용자 명단 받는 중...")
-            if not download_list(page, "10", users_path, log):
-                raise RuntimeError("이용자 명단을 받지 못했습니다.")
+            for attempt in range(3):  # 서버가 가끔 빈 명단을 주면 다시 받는다 (이용자가 0명일 수는 없음)
+                if download_list(page, "10", users_path, log) and read_list(users_path):
+                    break
+                log("이용자 명단이 비어 있어 다시 받아요...")
+            else:
+                raise RuntimeError("이용자 명단을 받지 못했습니다. (3번 받아도 비어 있음)")
             progress(40, "장기부재 명단 받는 중...")
             log("장기부재 명단 받는 중...")
             has_absent = download_list(page, "01", absent_path, log)
