@@ -343,6 +343,7 @@ def status():
     with sync_playwright() as pw:
         browser = pw.chromium.connect_over_cdp(CDP)
         for ctx in browser.contexts:
+            ctx.on("dialog", lambda d: None)
             for page in ctx.pages:
                 if logged_in(page):
                     return "ok"
@@ -356,6 +357,7 @@ def open_site(app):
     with sync_playwright() as pw:
         browser = pw.chromium.connect_over_cdp(CDP)
         ctx = browser.contexts[0]
+        ctx.on("dialog", lambda d: None)
         page = next((p for p in ctx.pages if "s-care.mohw.go.kr" in p.url), None) or ctx.new_page()
         page.bring_to_front()
         page.goto(HOME)
@@ -380,6 +382,7 @@ def run(app, people, planner_name, other, on_row, log, save=True):
     else:
         with sync_playwright() as pw:
             browser = pw.chromium.connect_over_cdp(CDP)
+            browser.contexts[0].on("dialog", lambda d: None)
             page = browser.contexts[0].new_page()
             try:
                 log(f"계획자 '{planner_name}' 확인 중")

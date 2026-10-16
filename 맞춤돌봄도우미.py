@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "2.0.7"
+APP_VERSION = "2.0.8"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -32,6 +32,21 @@ IS_EXE = bool(getattr(sys, "frozen", False) or "__compiled__" in globals())
 # exe 파일 경로: Nuitka 단일 파일은 sys.executable 이 임시 폴더를 가리킬 수 있어 sys.argv[0] 을 쓴다
 EXE_PATH = (os.path.abspath(sys.argv[0]) if "__compiled__" in globals() else sys.executable) if IS_EXE else None
 WORK_DIR = os.path.dirname(EXE_PATH if IS_EXE else os.path.abspath(__file__))
+
+
+def _resource_dir():
+    """exe 에 함께 넣은 파일(아이콘 등)이 풀린 폴더. PyInstaller·Nuitka·소스 실행마다 달라서 icon.ico 가 있는 곳을 찾는다."""
+    cands = [getattr(sys, "_MEIPASS", None), os.path.dirname(sys.executable)]
+    if "__compiled__" in globals():
+        cands.append(getattr(__compiled__, "containing_dir", None))  # noqa: F821 (Nuitka 가 넣어 줌)
+    cands.append(os.path.dirname(os.path.abspath(__file__)))
+    for d in cands:
+        if d and os.path.exists(os.path.join(d, "icon.ico")):
+            return d
+    return os.path.dirname(os.path.abspath(__file__))
+
+
+RES_DIR = _resource_dir()
 APP_DATA_DIR = os.path.join(os.environ.get("LOCALAPPDATA", os.path.expanduser("~")), APP_NAME)
 PROFILE_DIR = os.path.join(APP_DATA_DIR, "chrome_profile")
 CRED_PATH = os.path.join(APP_DATA_DIR, "login.dat")
@@ -503,22 +518,30 @@ def check_backup_time(page):
         raise NeedLogin(BACKUP_MSG)
 
 
+_launch_lock = threading.Lock()
+
+
 def get_page(pw, show=False):
     """show=True 면 크롬 창을 보이게 띄운다. 아니면 로그인 정보가 있고 '창 숨기기'가 켜져 있을 때
     창 없이 백그라운드로 띄운다."""
     cancel_chrome_close()
     creds = load_credentials()
-    if show:
-        ensure_chrome(hidden=False, pw=pw)
-    elif not chrome_debug_alive():
-        if not creds:
-            raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '크롬 창 열기'를 누르고 로그인하거나, '로그인 정보'를 저장해 주세요.")
-        ensure_chrome(hidden=load_settings()["hide_chrome"], pw=pw)
+    with _launch_lock:  # 여러 작업이 동시에 시작해도 크롬은 한 번만 켠다
+        if show:
+            ensure_chrome(hidden=False, pw=pw)
+        elif not chrome_debug_alive():
+            if not creds:
+                raise NeedLogin("자동화용 크롬이 꺼져 있습니다. '크롬 창 열기'를 누르고 로그인하거나, '로그인 정보'를 저장해 주세요.")
+            ensure_chrome(hidden=load_settings()["hide_chrome"], pw=pw)
     browser = pw.chromium.connect_over_cdp(CDP_URL)
     ctx = browser.contexts[0]
-    page = next((p for p in ctx.pages if "goodeos.co.kr" in p.url), None)
-    if page is None:
-        page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    ctx.on("dialog", lambda d: None)  # 다른 작업 탭의 알림창을 이 연결이 자동으로 취소하지 않게
+    if show:
+        page = next((p for p in ctx.pages if "goodeos.co.kr" in p.url), None)
+        if page is None:
+            page = ctx.pages[0] if ctx.pages else ctx.new_page()
+    else:
+        page = ctx.new_page()  # 작업마다 자기 탭 (다른 기능과 동시에 해도 서로 화면을 건드리지 않게). 끝나면 정리됨
     page.on("dialog", lambda d: d.accept())
     page.goto(SITE + "/main/main.php")
     page.wait_for_load_state()
@@ -749,6 +772,7 @@ def check_status_all():
     with sync_playwright() as pw:
         browser = pw.chromium.connect_over_cdp(CDP_URL)
         for ctx in browser.contexts:
+            ctx.on("dialog", lambda d: None)  # 작업 중인 탭의 알림창을 건드리지 않게
             for page in ctx.pages:
                 if "goodeos.co.kr" not in page.url or goodeos:
                     continue
@@ -921,16 +945,50 @@ def _make_desktop_shortcut(target):
                    creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=20)
 
 
+def rename_exe_once():
+    """exe 이름이 'CareHelper-2.0.4.exe' 같으면 '맞춤돌봄도우미.exe' 로 바꾼다 (실행 중에도 이름은 바꿀 수 있다).
+    바탕화면 바로가기도 새 이름으로 맞춘다."""
+    global EXE_PATH
+    if not IS_EXE or not EXE_PATH:
+        return
+    exe = Path(EXE_PATH)
+    target = exe.with_name(APP_NAME + ".exe")
+    if exe.name == target.name or target.exists() or ".old" in exe.stem or ".new" in exe.stem:
+        return
+    try:
+        os.replace(exe, target)
+    except OSError:
+        return
+    EXE_PATH = str(target)
+    try:
+        lnk = Path(os.path.expanduser("~")) / "Desktop" / f"{APP_NAME}.lnk"
+        if lnk.exists() or exe.parent != target.parent:
+            _make_desktop_shortcut(target)
+    except Exception:
+        pass
+
+
 def cleanup_old_update_files():
     if not IS_EXE:
         return
+    rename_exe_once()
     exe, new, _old = _update_paths()
-    for f in [new] + list(exe.parent.glob(exe.stem + ".old*.exe")):
-        try:
-            if f.exists():
-                f.unlink()
-        except OSError:
-            pass
+
+    def remove_olds():
+        for _ in range(30):
+            left = []
+            olds = [f for pat in ("CareHelper*.old*.exe", f"{APP_NAME}*.old*.exe", exe.stem + ".old*.exe")
+                    for f in exe.parent.glob(pat)]  # 이 프로그램의 이전 파일만
+            for f in [new] + olds:
+                try:
+                    if f.exists():
+                        f.unlink()
+                except OSError:
+                    left.append(f)
+            if not left:
+                return
+            time.sleep(2)
+    threading.Thread(target=remove_olds, daemon=True).start()
     _cleanup_old_unpacked()
 
 
@@ -939,7 +997,7 @@ def _cleanup_old_unpacked():
     if "__compiled__" not in globals():
         return
     import shutil
-    here = os.path.normcase(os.path.abspath(os.path.dirname(__file__)))
+    keep = [os.path.normcase(os.path.abspath(p)) for p in (RES_DIR, os.path.dirname(sys.executable))]
     root = os.path.join(os.environ.get("LOCALAPPDATA", ""), "CareHelper")
     try:
         names = os.listdir(root)
@@ -949,8 +1007,11 @@ def _cleanup_old_unpacked():
         d = os.path.join(root, name)
         if not re.fullmatch(r"[\d.]+", name) or not os.path.isdir(d):
             continue  # 버전 이름 폴더만
-        if here.startswith(os.path.normcase(os.path.abspath(d))):
-            continue  # 지금 쓰는 폴더
+        if _parse_version(name) == _parse_version(APP_VERSION):
+            continue  # 지금 버전 폴더
+        nd = os.path.normcase(os.path.abspath(d))
+        if any(k == nd or k.startswith(nd + os.sep) for k in keep):
+            continue  # 지금 쓰는 폴더 (이름이 달라도)
         shutil.rmtree(d, ignore_errors=True)
 
 
@@ -1124,7 +1185,7 @@ def main_gui():
     root.geometry("1000x820")
     root.minsize(900, 640)
     root.configure(bg=C_BG)
-    icon = os.path.join(getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__))), "icon.ico")
+    icon = os.path.join(RES_DIR, "icon.ico")
     try:
         root.iconbitmap(icon)
     except Exception:

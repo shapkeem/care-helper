@@ -184,7 +184,7 @@ class KakaoJob:
         if self.running:
             return "앞 작업이 아직 진행 중이에요. 질문에 답하거나 '멈춤'을 눌러 주세요."
         if self.busy["v"]:
-            return "일일실적 점검이 진행 중이에요. 끝난 뒤에 눌러 주세요."
+            return "카톡 요청 처리가 이미 진행 중이에요."
         text = (text or "").strip()
         if not text:
             return "카톡 내용을 먼저 붙여넣어 주세요."

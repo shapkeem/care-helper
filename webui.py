@@ -122,18 +122,22 @@ class Api:
     def __init__(self, app):
         self._app = app
         self._win = None
-        self._busy = {"v": False}
+        # 기능마다 따로: 카톡 처리 중에도 일일실적 점검 등 다른 기능은 동시에 할 수 있다
+        self._b = {k: {"v": False} for k in ("daily", "kakao", "conv", "scare", "chrome", "update")}
         self._check = None
         self._filled = set()  # 실적을 넣은 사람 번호 (모두 넣기에서 다시 넣지 않게)
         self._upd = None
         import kakao_job
         self._job = kakao_job.KakaoJob(
-            app, self._busy,
+            app, self._b["kakao"],
             status=lambda t: self._emit("k_status", t),
             row=lambda r: self._emit("k_row", r),
             log=lambda line: self._emit("k_log", line),
             question=self._on_question)
-        app._idle["busy"] = lambda: self._busy["v"]
+        app._idle["busy"] = self._any_busy
+
+    def _any_busy(self):
+        return any(f["v"] for f in self._b.values())
 
     def _emit(self, ev, data=None):
         if self._win is not None:
@@ -162,7 +166,7 @@ class Api:
                 "hasJev": bool(a.load_jev_key()), "hideChrome": a.load_settings()["hide_chrome"]}
 
     def status(self):
-        if self._busy["v"]:
+        if self._b["chrome"]["v"] or self._b["update"]["v"]:
             return None
         try:
             kind, scare = self._app.check_status_all()
@@ -172,9 +176,9 @@ class Api:
 
     # ---- 일일실적 점검
     def check(self):
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요."
-        self._busy["v"] = True
+        if self._b["daily"]["v"]:
+            return "일일실적 점검이 이미 진행 중이에요."
+        self._b["daily"]["v"] = True
         self._thread(self._run_check)
         return None
 
@@ -196,7 +200,7 @@ class Api:
         except Exception as e:
             self._emit("check_error", f"문제가 생겼어요: {e}")
         finally:
-            self._busy["v"] = False
+            self._b["daily"]["v"] = False
             a.schedule_chrome_close()
 
     def _row(self, idx):
@@ -205,16 +209,16 @@ class Api:
         return allrows[idx]
 
     def fill(self, idx):
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요. 끝난 뒤에 눌러 주세요."
+        if self._b["daily"]["v"]:
+            return "실적을 넣는 중이에요. 끝난 뒤에 눌러 주세요."
         r, _ = self._row(idx)
-        self._busy["v"] = True
+        self._b["daily"]["v"] = True
 
         def work():
             try:
                 ok, msg = self._app.fill_result(r["생활지원사"], r["성명"], self._check["day"])
             finally:
-                self._busy["v"] = False
+                self._b["daily"]["v"] = False
             if ok:
                 self._filled.add(idx)
             self._emit("fill_done", {"idx": idx, "ok": ok, "msg": msg})
@@ -223,8 +227,8 @@ class Api:
 
     def fill_all(self):
         """실적 미입력인 사람 모두에게 탭을 나눠 동시에 실적을 넣는다."""
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요. 끝난 뒤에 눌러 주세요."
+        if self._b["daily"]["v"]:
+            return "실적을 넣는 중이에요. 끝난 뒤에 눌러 주세요."
         if not self._check:
             return "먼저 점검을 해 주세요."
         rows = [(i, r["생활지원사"], r["성명"])
@@ -233,7 +237,7 @@ class Api:
         if not rows:
             return "실적을 넣을 사람이 없어요."
         day = self._check["day"]
-        self._busy["v"] = True
+        self._b["daily"]["v"] = True
 
         def one(idx, ok, msg):
             if ok:
@@ -248,7 +252,7 @@ class Api:
                     if idx not in self._filled:
                         self._emit("fill_done", {"idx": idx, "ok": False, "msg": f"문제가 생겼어요: {e}", "quiet": True})
             finally:
-                self._busy["v"] = False
+                self._b["daily"]["v"] = False
             self._emit("fill_all_done", {"total": len(rows), "ok": sum(1 for i, _, _ in rows if i in self._filled)})
         self._thread(work)
         return len(rows)
@@ -296,9 +300,9 @@ class Api:
 
     def conv_start(self):
         import kakao_job
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요."
-        self._busy["v"] = True
+        if self._b["conv"]["v"]:
+            return "변환이나 업로드가 이미 진행 중이에요."
+        self._b["conv"]["v"] = True
         self._conv_del = ([], [])
 
         def work():
@@ -326,7 +330,7 @@ class Api:
                 log(f"[오류] {e}")
                 self._emit("conv_done", {"error": str(e)})
             finally:
-                self._busy["v"] = False
+                self._b["conv"]["v"] = False
                 self._app.schedule_chrome_close()
         self._thread(work)
         return None
@@ -385,14 +389,14 @@ class Api:
         return {"file": f.name, "rows": pc.count_data_rows(f)}
 
     def conv_upload(self, save=True):
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요."
+        if self._b["conv"]["v"]:
+            return "변환이나 업로드가 이미 진행 중이에요."
         import plan_converter as pc
         _src, dst = pc.work_folders()
         f = pc.find_upload_file(dst)
         if f is None:
             return "올릴 통합본이 없어요."
-        self._busy["v"] = True
+        self._b["conv"]["v"] = True
 
         def work():
             import goodeos_work as g
@@ -414,7 +418,7 @@ class Api:
                 log(f"[오류] 업로드: {e}")
                 self._emit("conv_upload_done", {"error": str(e)})
             finally:
-                self._busy["v"] = False
+                self._b["conv"]["v"] = False
                 self._app.schedule_chrome_close()
         self._thread(work)
         return None
@@ -434,9 +438,9 @@ class Api:
                 "group": s.get("scare_group", "일반")}
 
     def scare_open(self):
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요."
-        self._busy["v"] = True
+        if self._b["scare"]["v"]:
+            return "s-care 작업이 이미 진행 중이에요."
+        self._b["scare"]["v"] = True
 
         def work():
             import scare_plan as sp
@@ -448,14 +452,14 @@ class Api:
             except Exception as e:
                 self._emit("s_msg", {"ok": False, "msg": f"크롬을 열지 못했어요: {e}"})
             finally:
-                self._busy["v"] = False
+                self._b["scare"]["v"] = False
         self._thread(work)
         return None
 
     def scare_start(self, text, group, planner, other):
         import scare_plan as sp
-        if self._busy["v"]:
-            return {"error": "다른 작업이 진행 중이에요."}
+        if self._b["scare"]["v"]:
+            return {"error": "s-care 작업이 이미 진행 중이에요."}
         planner = (planner or "").strip()
         if not planner:
             return {"error": "계획자 이름을 넣어 주세요."}
@@ -466,7 +470,7 @@ class Api:
         if not people:
             return {"error": "어르신 이름을 넣어 주세요."}
         self._app.save_settings(scare_planner=planner, scare_other=bool(other), scare_group=group)
-        self._busy["v"] = True
+        self._b["scare"]["v"] = True
 
         def work():
             log = lambda m: self._emit("s_log", m)
@@ -479,7 +483,7 @@ class Api:
             except Exception as e:
                 self._emit("s_done", {"error": f"문제가 생겼어요: {str(e).splitlines()[0][:200]}"})
             finally:
-                self._busy["v"] = False
+                self._b["scare"]["v"] = False
         self._thread(work)
         return {"people": [{"name": n, "group": g} for n, g in people]}
 
@@ -498,15 +502,15 @@ class Api:
         return "저장된 로그인 정보를 지웠어요."
 
     def open_chrome(self):
-        if self._busy["v"]:
-            return "다른 작업이 진행 중이에요."
-        self._busy["v"] = True
+        if self._any_busy():
+            return "다른 작업이 진행 중이에요. 크롬 창은 작업이 끝난 뒤에 열어 주세요."
+        self._b["chrome"]["v"] = True
 
         def work():
             try:
                 ok, msg = self._app.open_chrome_window()
             finally:
-                self._busy["v"] = False
+                self._b["chrome"]["v"] = False
             self._emit("settings_msg", {"ok": ok, "msg": msg})
         self._thread(work)
         return None
@@ -526,20 +530,20 @@ class Api:
         a, info = self._app, self._upd
         if not info:
             return "새 버전 정보가 없어요."
-        if self._busy["v"]:
+        if self._any_busy():
             return "작업이 끝난 뒤에 업데이트해 주세요."
         if not self._app.IS_EXE or not info.get("asset_url"):
             import webbrowser
             webbrowser.open(info["page_url"])
             return "다운로드 페이지를 열었어요."
-        self._busy["v"] = True
+        self._b["update"]["v"] = True
 
         def work():
             try:
                 relocated = a.download_and_install_update(
                     info, lambda p: self._emit("update_progress", p))
             except Exception as e:
-                self._busy["v"] = False
+                self._b["update"]["v"] = False
                 self._emit("update_failed", "업데이트하지 못했어요. " + a.update_error_text(e))
                 return
             if relocated:

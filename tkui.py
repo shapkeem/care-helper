@@ -31,14 +31,18 @@ class TkUI:
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
         except Exception:
             pass
+        try:  # 작업표시줄에서 이 프로그램 아이콘으로 묶이게
+            import ctypes
+            ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("CareHelper.App")
+        except Exception:
+            pass
         self.root = root = tk.Tk()
         root.title(app.APP_NAME)
         root.geometry("1040x820")
         root.minsize(900, 640)
         root.configure(bg=app.C_BG)
-        base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-        try:
-            root.iconbitmap(os.path.join(base, "icon.ico"))
+        try:  # 창·작업표시줄 아이콘 (안 하면 tkinter 기본 깃털이 나온다)
+            root.iconbitmap(default=os.path.join(app.RES_DIR, "icon.ico"))
         except Exception:
             pass
         self.RB = app._make_round_button_class(tk, tkfont)
