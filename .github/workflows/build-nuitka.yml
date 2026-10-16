@@ -31,8 +31,8 @@ jobs:
             --include-data-dir=ui=ui --include-data-files=icon.ico=icon.ico `
             --include-module=webui --include-module=kakao_ui --include-module=plan_converter --include-module=scare_plan `
             --include-module=kakao --include-module=kakao_job --include-module=runner --include-module=goodeos_work --include-module=jev `
-            --include-package=playwright --include-package-data=playwright --include-data-dir="$drv=playwright/driver" `
-            --include-package=webview --include-package-data=webview `
+            --include-package=playwright --include-data-dir="$drv=playwright/driver" `
+            --enable-plugin=pywebview `
             --enable-plugin=tk-inter `
             --output-dir=dist --output-filename="CareHelper-$ver-nuitka.exe" `
             "맞춤돌봄도우미.py"
