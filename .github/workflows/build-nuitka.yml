@@ -24,7 +24,7 @@ jobs:
           echo "VER=$ver" >> $env:GITHUB_ENV
           Set-Content -Path _build_flags.py -Value 'UI = "tk"' -Encoding utf8
           $drv = python -c "import playwright, os; print(os.path.join(os.path.dirname(playwright.__file__), 'driver'))"
-          python -m nuitka --onefile --assume-yes-for-downloads --msvc=latest `
+          python -m nuitka --onefile --assume-yes-for-downloads --msvc=latest --jobs=2 --low-memory `
             --windows-console-mode=disable --windows-icon-from-ico=icon.ico `
             --company-name=CareHelper --product-name=CareHelper --file-description=CareHelper `
             --file-version=$ver --product-version=$ver `
@@ -33,7 +33,7 @@ jobs:
             --include-module=_build_flags --include-module=tkui --include-module=webui --include-module=kakao_ui --include-module=plan_converter --include-module=scare_plan `
             --include-module=kakao --include-module=kakao_job --include-module=runner --include-module=goodeos_work --include-module=jev `
             --include-package=playwright --include-data-dir="$drv=playwright/driver" `
-            --nofollow-import-to=webview `
+            --nofollow-import-to=webview --nofollow-import-to=playwright.async_api `
             --enable-plugin=tk-inter `
             --output-dir=dist --output-filename="CareHelper-$ver-nuitka.exe" `
             "맞춤돌봄도우미.py"
