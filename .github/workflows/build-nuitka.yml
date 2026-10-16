@@ -3,6 +3,8 @@ name: Nuitka 시험 빌드
 # 배포(릴리스)는 하지 않고 exe 를 다운로드 파일(artifact)로만 남긴다
 on:
   workflow_dispatch:
+  push:
+    branches: ["nuitka-test"]
 
 jobs:
   build:
