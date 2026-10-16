@@ -1560,7 +1560,10 @@ if __name__ == "__main__":
                 close_chrome()
     else:
         started = False
-        if "--classic" not in sys.argv:  # 웹 화면(WebView2)을 쓸 수 없으면 기본 화면으로
+        if "--tk" in sys.argv:  # 시험: WebView 없이 tkinter 로 그린 새 화면
+            import tkui
+            started = tkui.start(sys.modules[__name__])
+        if not started and "--classic" not in sys.argv and "--tk" not in sys.argv:  # 웹 화면(WebView2)을 쓸 수 없으면 기본 화면으로
             try:
                 import webui
                 started = webui.start(sys.modules[__name__])
