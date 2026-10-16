@@ -1560,7 +1560,13 @@ if __name__ == "__main__":
                 close_chrome()
     else:
         started = False
-        if "--tk" in sys.argv:  # 시험: WebView 없이 tkinter 로 그린 새 화면
+        try:  # 빌드할 때 화면 방식을 정해 넣을 수 있다 (Nuitka 시험판은 tkinter 화면이 기본)
+            import _build_flags
+            if getattr(_build_flags, "UI", "") == "tk" and "--web" not in sys.argv:
+                sys.argv.append("--tk")
+        except ImportError:
+            pass
+        if "--tk" in sys.argv:  # WebView 없이 tkinter 로 그린 새 화면
             import tkui
             started = tkui.start(sys.modules[__name__])
         if not started and "--classic" not in sys.argv and "--tk" not in sys.argv:  # 웹 화면(WebView2)을 쓸 수 없으면 기본 화면으로
