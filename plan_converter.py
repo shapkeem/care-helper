@@ -506,7 +506,6 @@ COL_VENDOR = 12
 
 END_CHECK_SKIP_COLS = {COL_A_START, COL_A_END}
 
-BENEFICIARY_FILE_STEM = "대상자리스트"
 GROUP_COLUMN_NAME = "관리구분"  # 대상자리스트 '이용정보' 아래 칸, 값은 일반/중점
 GENERAL_GROUP_FORBIDDEN_CODES = {"43202": "청소관리"}  # 일반군에 넣으면 안 되는 서비스코드
 
@@ -827,10 +826,6 @@ def _date_builder(text):
     if d is None:
         raise ValueError("날짜는 20260706 같은 8자리로 입력하세요.")
     return [d]
-
-
-def _text_builder(text):
-    return [str(text).strip()]
 
 
 def _code_builder(text):

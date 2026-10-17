@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "2.0.8"
+APP_VERSION = "2.0.9"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 
@@ -750,10 +750,6 @@ def build_report(missing, absent_reg, n_users, n_absent, service_people, day=Non
 
 
 # ---------------------------------------------------------------- 전체 실행
-def check_status():
-    return check_status_all()[0]
-
-
 def check_status_all():
     """→ (goodeos 상태, s-care 상태)
     goodeos: 'off'(자동화 크롬 꺼짐) / 'login'(로그인 필요) / 'ok'(로그인됨) / 'ok_hidden'(백그라운드에서 로그인됨)
@@ -946,23 +942,27 @@ def _make_desktop_shortcut(target):
 
 
 def rename_exe_once():
-    """exe 이름이 'CareHelper-2.0.4.exe' 같으면 '맞춤돌봄도우미.exe' 로 바꾼다 (실행 중에도 이름은 바꿀 수 있다).
-    바탕화면 바로가기도 새 이름으로 맞춘다."""
+    """exe 이름이 'CareHelper-2.0.4.exe'·'...old.exe' 같으면 '맞춤돌봄도우미.exe' 로 바꾼다 (실행 중에도 이름은 바꿀 수 있다).
+    OneDrive 가 방금 받은 파일을 잠깐 잡고 있을 수 있어 몇 번 다시 시도한다. 바탕화면 바로가기도 새 이름으로 맞춘다."""
     global EXE_PATH
     if not IS_EXE or not EXE_PATH:
         return
     exe = Path(EXE_PATH)
     target = exe.with_name(APP_NAME + ".exe")
-    if exe.name == target.name or target.exists() or ".old" in exe.stem or ".new" in exe.stem:
+    if exe.name == target.name or target.exists():
         return
-    try:
-        os.replace(exe, target)
-    except OSError:
+    for _ in range(30):
+        try:
+            os.replace(exe, target)
+            break
+        except OSError:
+            time.sleep(2)
+    else:
         return
     EXE_PATH = str(target)
     try:
         lnk = Path(os.path.expanduser("~")) / "Desktop" / f"{APP_NAME}.lnk"
-        if lnk.exists() or exe.parent != target.parent:
+        if lnk.exists():
             _make_desktop_shortcut(target)
     except Exception:
         pass
@@ -971,24 +971,26 @@ def rename_exe_once():
 def cleanup_old_update_files():
     if not IS_EXE:
         return
-    rename_exe_once()
-    exe, new, _old = _update_paths()
 
-    def remove_olds():
+    def work():
+        rename_exe_once()
+        exe, new, _old = _update_paths()
+        me = os.path.normcase(str(exe))
         for _ in range(30):
-            left = []
-            olds = [f for pat in ("CareHelper*.old*.exe", f"{APP_NAME}*.old*.exe", exe.stem + ".old*.exe")
+            olds = [f for pat in ("CareHelper*.old*.exe", f"{APP_NAME}*.old*.exe", "CareHelper*.new.exe")
                     for f in exe.parent.glob(pat)]  # 이 프로그램의 이전 파일만
-            for f in [new] + olds:
+            left = []
+            for f in olds:
+                if os.path.normcase(str(f)) == me:
+                    continue  # 지금 실행 중인 자기 자신은 절대 지우지 않는다
                 try:
-                    if f.exists():
-                        f.unlink()
+                    f.unlink()
                 except OSError:
                     left.append(f)
             if not left:
                 return
             time.sleep(2)
-    threading.Thread(target=remove_olds, daemon=True).start()
+    threading.Thread(target=work, daemon=True).start()
     _cleanup_old_unpacked()
 
 
@@ -1090,20 +1092,6 @@ def _install_in_place(exe, new, old):
 
 
 # ---------------------------------------------------------------- 화면
-C_BG = "#FFFFFF"
-C_CARD = "#F1F5F9"
-C_LINE = "#E2E8F0"
-C_TEXT = "#0F172A"
-C_MUTED = "#64748B"
-C_PRIMARY = "#2563EB"
-C_PRIMARY_H = "#1D4ED8"
-C_DANGER_BG = "#FEE2E2"
-C_DANGER = "#B91C1C"
-C_SIDE = "#F8FAFC"
-C_SIDE_HOVER = "#EEF2F6"
-C_SIDE_ON = "#E2E8F0"
-FONT = "맑은 고딕"
-
 STATUS_STYLE = {  # 상태: (배경, 글자, 문구)
     "ok": ("#DCFCE7", "#166534", "goodeos 로그인됨"),
     "ok_hidden": ("#DCFCE7", "#166534", "goodeos 로그인됨 · 크롬 백그라운드"),
@@ -1113,522 +1101,6 @@ STATUS_STYLE = {  # 상태: (배경, 글자, 문구)
     "off": ("#F1F5F9", "#475569", "자동화 크롬이 꺼져 있어요"),
     "check": ("#F1F5F9", "#475569", "상태 확인 중..."),
 }
-
-
-def _make_round_button_class(tk, tkfont):
-    class RoundButton(tk.Canvas):
-        KINDS = {  # (평소, 마우스 올림, 글자, 테두리)
-            "primary": (C_PRIMARY, C_PRIMARY_H, "#FFFFFF", None),
-            "secondary": ("#FFFFFF", "#F1F5F9", C_TEXT, "#CBD5E1"),
-            "update": ("#15803D", "#166534", "#FFFFFF", None),
-        }
-
-        def __init__(self, master, text, command, kind="secondary", height=38, padx=18, size=10, bg=C_BG):
-            self._font = tkfont.Font(family=FONT, size=size, weight="bold")
-            self._kind, self._text, self._cmd = kind, text, command
-            self._h, self._padx, self._enabled, self._hover = height, padx, True, False
-            super().__init__(master, width=self._font.measure(text) + padx * 2, height=height,
-                             bg=bg, highlightthickness=0, cursor="hand2")
-            self.bind("<Enter>", lambda e: self._set_hover(True))
-            self.bind("<Leave>", lambda e: self._set_hover(False))
-            self.bind("<ButtonRelease-1>", self._click)
-            self._draw()
-
-        def _set_hover(self, v):
-            self._hover = v
-            self._draw()
-
-        def _click(self, _e):
-            if self._enabled and self._cmd:
-                self._cmd()
-
-        def _draw(self):
-            fill, hover, fg, line = self.KINDS[self._kind]
-            if not self._enabled:
-                fill, fg, line = "#E2E8F0", "#94A3B8", None
-            elif self._hover:
-                fill = hover
-            w, h, r = int(self["width"]), self._h, self._h / 2
-            self.delete("all")
-            x1, y1, x2, y2 = 1, 1, w - 1, h - 1
-            pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-                   x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
-            self.create_polygon(pts, smooth=True, fill=fill, outline=line or fill)
-            self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=self._font)
-
-        def set_text(self, text):
-            self._text = text
-            self.configure(width=self._font.measure(text) + self._padx * 2)
-            self._draw()
-
-        def set_enabled(self, v):
-            self._enabled = v
-            self.configure(cursor="hand2" if v else "arrow")
-            self._draw()
-
-    return RoundButton
-
-
-def main_gui():
-    import tkinter as tk
-    from tkinter import font as tkfont, messagebox, ttk
-
-    try:  # 글자가 흐리지 않게
-        import ctypes
-        ctypes.windll.shcore.SetProcessDpiAwareness(1)
-    except Exception:
-        pass
-    RoundButton = _make_round_button_class(tk, tkfont)
-
-    root = tk.Tk()
-    root.title(APP_NAME)
-    root.geometry("1000x820")
-    root.minsize(900, 640)
-    root.configure(bg=C_BG)
-    icon = os.path.join(RES_DIR, "icon.ico")
-    try:
-        root.iconbitmap(icon)
-    except Exception:
-        pass
-    cleanup_old_update_files()
-    try:  # 예전 버전이 남긴 처리 기록 파일 (이제 파일로 남기지 않음)
-        os.remove(os.path.join(APP_DATA_DIR, "처리기록.log"))
-    except OSError:
-        pass
-
-    busy = {"v": False, "poll": False}
-    upd = {"info": None, "btn": None, "on": False, "running": False}
-    state = {"missing": [], "absent": [], "report": "", "day": date.today()}
-
-    def F(size, bold=False):
-        return tkfont.Font(family=FONT, size=size, weight="bold" if bold else "normal")
-
-    # ================= 왼쪽 메뉴 =================
-    side = tk.Frame(root, bg=C_SIDE, width=200)
-    side.pack(side="left", fill="y")
-    side.pack_propagate(False)
-    tk.Frame(root, bg=C_LINE, width=1).pack(side="left", fill="y")
-    content = tk.Frame(root, bg=C_BG)
-    content.pack(side="left", fill="both", expand=True)
-
-    tk.Label(side, text="맞춤돌봄도우미", font=F(13, True), bg=C_SIDE, fg=C_TEXT, anchor="w",
-             padx=18, pady=18).pack(fill="x")
-    nav = {}
-    pages = {}
-    cur = {"page": None}
-
-    def nav_item(parent, key, text):
-        lab = tk.Label(parent, text=text, font=F(10), bg=C_SIDE, fg=C_MUTED, anchor="w",
-                       padx=14, pady=8, cursor="hand2")
-        lab.pack(fill="x", padx=8, pady=1)
-        lab.bind("<Button-1>", lambda e: show_page(key))
-        lab.bind("<Enter>", lambda e: cur["page"] != key and lab.configure(bg=C_SIDE_HOVER))
-        lab.bind("<Leave>", lambda e: cur["page"] != key and lab.configure(bg=C_SIDE))
-        nav[key] = lab
-
-    nav_item(side, "daily", "일일실적 점검")
-    nav_item(side, "kakao", "카톡 요청 처리")
-    side_bottom = tk.Frame(side, bg=C_SIDE)
-    side_bottom.pack(side="bottom", fill="x", pady=(0, 14))
-    tk.Frame(side_bottom, bg=C_LINE, height=1).pack(fill="x", pady=(0, 8))
-    nav_item(side_bottom, "settings", "설정")
-    pill = tk.Label(side_bottom, font=F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=140)
-    pill.pack(anchor="w", padx=22, pady=(8, 4))
-    head_right = tk.Frame(side_bottom, bg=C_SIDE)  # 업데이트 버튼 자리
-    head_right.pack(anchor="w", padx=22)
-    tk.Label(side_bottom, text=f"v{APP_VERSION}", font=F(8), bg=C_SIDE, fg=C_MUTED).pack(anchor="w", padx=22)
-
-    def show_page(key):
-        if key not in pages:
-            pages[key] = PAGE_BUILDERS[key]()
-        for k, lab in nav.items():
-            on = k == key
-            lab.configure(bg=C_SIDE_ON if on else C_SIDE, fg=C_TEXT if on else C_MUTED,
-                          font=F(10, on))
-        for k, p in pages.items():
-            if k != key:
-                p.pack_forget()
-        pages[key].pack(fill="both", expand=True, padx=26, pady=(20, 12))
-        cur["page"] = key
-        refresh = getattr(pages[key], "refresh", None)
-        if refresh:
-            refresh()
-
-    # ================= 일일실적 점검 =================
-    outer = tk.Frame(content, bg=C_BG)
-    pages["daily"] = outer
-
-    # ---- 머리글
-    head = tk.Frame(outer, bg=C_BG)
-    head.pack(fill="x")
-    titles = tk.Frame(head, bg=C_BG)
-    titles.pack(side="left")
-    tk.Label(titles, text="일일실적 점검", font=F(17, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
-    wd = "월화수목금토일"[date.today().weekday()]
-    tk.Label(titles, text=f"{date.today():%Y-%m-%d} {wd}요일 · 오늘 실적 기준",
-             font=F(10), bg=C_BG, fg=C_MUTED).pack(anchor="w")
-    btn_check = RoundButton(head, "점검 시작", lambda: do_check(), kind="primary")
-    btn_check.pack(side="right", anchor="n")
-    tk.Frame(outer, bg=C_BG, height=14).pack(fill="x")
-
-    # ---- 진행 표시
-    prog_text = tk.Label(outer, text="준비됐어요. 점검 시작을 눌러 주세요.", font=F(9), bg=C_BG,
-                         fg=C_MUTED, anchor="w")
-    prog_text.pack(fill="x")
-    style = ttk.Style()
-    try:
-        style.theme_use("clam")
-    except tk.TclError:
-        pass
-    style.configure("Thin.Horizontal.TProgressbar", troughcolor=C_CARD, background=C_PRIMARY,
-                    bordercolor=C_CARD, lightcolor=C_PRIMARY, darkcolor=C_PRIMARY, thickness=4)
-    prog = ttk.Progressbar(outer, style="Thin.Horizontal.TProgressbar", maximum=100, length=200)
-    prog.pack(fill="x", pady=(4, 14))
-
-    # ---- 요약 숫자
-    cards = tk.Frame(outer, bg=C_BG)
-    cards.pack(fill="x")
-    metric = {}
-    for i, (key, label, danger) in enumerate([("users", "이용자", False), ("absent", "장기부재", False),
-                                              ("missing", "실적 미입력", True), ("absent_reg", "장기부재 실적", False)]):
-        cards.columnconfigure(i, weight=1, uniform="m")
-        bg = C_CARD
-        box = tk.Frame(cards, bg=bg, padx=12, pady=8)
-        box.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 5, 0 if i == 3 else 5))
-        tk.Label(box, text=label, font=F(9), bg=bg, fg=C_MUTED, anchor="w").pack(fill="x")
-        num = tk.Label(box, text="-", font=F(20), bg=bg, fg=C_TEXT, anchor="w")
-        num.pack(fill="x")
-        metric[key] = (box, num, danger)
-
-    # ---- 결과 목록
-    listhead = tk.Frame(outer, bg=C_BG)
-    listhead.pack(fill="x", pady=(16, 4))
-    list_title = tk.Label(listhead, text="실적 확인이 필요한 사람", font=F(11, True), bg=C_BG, fg=C_TEXT)
-    list_title.pack(side="left")
-    RoundButton(listhead, "전체 복사", lambda: copy_text(state["report"].strip(), "전체 결과를 복사했어요."),
-                height=30, padx=12, size=9).pack(side="right")
-
-    listwrap = tk.Frame(outer, bg=C_BG, highlightbackground=C_LINE, highlightthickness=1)
-    listwrap.pack(fill="both", expand=True)
-    canvas = tk.Canvas(listwrap, bg=C_BG, highlightthickness=0)
-    sb = ttk.Scrollbar(listwrap, orient="vertical", command=canvas.yview)
-    canvas.configure(yscrollcommand=sb.set)
-    sb.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-    inner = tk.Frame(canvas, bg=C_BG)
-    win_id = canvas.create_window((0, 0), window=inner, anchor="nw")
-    inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-    canvas.bind("<Configure>", lambda e: canvas.itemconfig(win_id, width=e.width))
-    canvas.bind_all("<MouseWheel>", lambda e: cur["page"] == "daily"
-                    and canvas.yview_scroll(int(-e.delta / 120), "units"))
-
-    empty = tk.Label(inner, text="점검을 시작하면 여기에 결과가 나와요.", font=F(10), bg=C_BG, fg=C_MUTED, pady=40)
-    empty.pack(fill="x")
-
-    # ================= 설정 =================
-    def build_settings():
-        page = tk.Frame(content, bg=C_BG)
-        tk.Label(page, text="설정", font=F(17, True), bg=C_BG, fg=C_TEXT).pack(anchor="w")
-        tk.Label(page, text="이 PC의 윈도우 계정에만 암호화해서 저장돼요.", font=F(10), bg=C_BG,
-                 fg=C_MUTED).pack(anchor="w", pady=(0, 16))
-        form = tk.Frame(page, bg=C_BG)
-        form.pack(anchor="w", fill="x")
-        saved = load_credentials() or ("", "")
-        fields = {}
-        for key, label, value, show in (
-                ("id", "goodeos 아이디", saved[0], ""),
-                ("pw", "goodeos 비밀번호", saved[1], "●"),
-                ("jev", "Jev API 키 (카톡 요청 처리용)",
-                 "" if os.environ.get("TYPESAFE_API_KEY") else load_jev_key(), "●")):
-            tk.Label(form, text=label, font=F(9), bg=C_BG, fg=C_MUTED).pack(anchor="w")
-            e = tk.Entry(form, font=F(11), width=36, show=show, relief="solid", bd=1)
-            e.insert(0, value)
-            e.pack(anchor="w", pady=(2, 12), ipady=3)
-            fields[key] = e
-        if os.environ.get("TYPESAFE_API_KEY"):
-            tk.Label(form, text="Jev API 키는 이 PC 환경변수(TYPESAFE_API_KEY)에 있는 걸 쓰고 있어요.",
-                     font=F(8), bg=C_BG, fg=C_MUTED).pack(anchor="w", pady=(0, 10))
-        hide_var = tk.BooleanVar(value=load_settings()["hide_chrome"])
-        tk.Checkbutton(form, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=hide_var,
-                       font=F(9), bg=C_BG, fg=C_TEXT, activebackground=C_BG,
-                       selectcolor=C_BG, anchor="w").pack(anchor="w")
-        btns = tk.Frame(page, bg=C_BG)
-        btns.pack(anchor="w", pady=(16, 0))
-        msg = tk.Label(page, text="", font=F(9), bg=C_BG, fg=C_MUTED, anchor="w")
-        msg.pack(anchor="w", pady=(10, 0))
-        settings_msg["label"] = msg
-
-        def save():
-            ok, text = save_all_settings(fields["id"].get(), fields["pw"].get(), fields["jev"].get(),
-                                         bool(hide_var.get()))
-            msg.configure(text=text, fg=C_MUTED if ok else C_DANGER)
-
-        def remove():
-            delete_credentials()
-            fields["id"].delete(0, "end")
-            fields["pw"].delete(0, "end")
-            msg.configure(text="저장된 로그인 정보를 지웠어요.", fg=C_MUTED)
-
-        RoundButton(btns, "저장", save, kind="primary", height=34, padx=18, size=9).pack(side="left")
-        RoundButton(btns, "크롬 창 열기", lambda: do_open(), height=34, padx=16, size=9).pack(
-            side="left", padx=(8, 0))
-        RoundButton(btns, "로그인 정보 지우기", remove, height=34, padx=16, size=9).pack(side="left", padx=(8, 0))
-        return page
-
-    settings_msg = {"label": None}
-
-    def settings_note(text, error=False):
-        lab = settings_msg["label"]
-        if lab is not None:
-            lab.configure(text=text, fg=C_DANGER if error else C_MUTED)
-
-    def build_kakao():
-        import kakao_ui
-        return kakao_ui.build_page(content, RoundButton, F, busy, sys.modules[__name__])
-
-    PAGE_BUILDERS = {"settings": build_settings, "kakao": build_kakao}
-
-    # ================= 동작 =================
-    def ui(fn):
-        root.after(0, fn)
-
-    def set_status(kind):
-        bg, fg, text = STATUS_STYLE[kind]
-        pill.configure(bg=bg, fg=fg, text="●  " + text)
-
-    def set_progress(pct, msg, error=False):
-        prog["value"] = pct
-        prog_text.configure(text=msg, fg=C_DANGER if error else C_MUTED)
-
-    def copy_text(text, msg):
-        root.clipboard_clear()
-        root.clipboard_append(text)
-        prog_text.configure(text=msg, fg=C_MUTED)
-
-    def fill_metrics(data):
-        vals = {"users": data["n_users"], "absent": data["n_absent"],
-                "missing": len(data["missing"]), "absent_reg": len(data["absent_reg"])}
-        for key, (box, num, danger) in metric.items():
-            v = vals[key]
-            hot = danger and v > 0
-            bg = C_DANGER_BG if hot else C_CARD
-            box.configure(bg=bg)
-            for w in box.winfo_children():
-                w.configure(bg=bg)
-            num.configure(text=str(v), fg=C_DANGER if hot else C_TEXT)
-            box.winfo_children()[0].configure(fg=C_DANGER if hot else C_MUTED)
-
-    def add_row(r, kind, first):
-        row = tk.Frame(inner, bg=C_BG)
-        row.pack(fill="x")
-        if not first:
-            tk.Frame(row, bg=C_LINE, height=1).pack(fill="x")
-        line = tk.Frame(row, bg=C_BG, padx=12, pady=8)
-        line.pack(fill="x")
-        tk.Label(line, text=r["성명"], font=F(10, True), bg=C_BG, fg=C_TEXT, width=9, anchor="w").pack(side="left")
-        phone = r["생활지원사 연락처"] or "번호 없음"
-        tk.Label(line, text=f"담당 {r['생활지원사']} · {phone}", font=F(9), bg=C_BG, fg=C_MUTED,
-                 anchor="w").pack(side="left", fill="x", expand=True)
-        tag_text = "미입력" if kind == "missing" else "장기부재 실적"
-        tag = tk.Label(line, text=tag_text, font=F(8), bg=C_DANGER_BG, fg=C_DANGER, padx=8, pady=1)
-        tag.pack(side="left", padx=8)
-        if kind == "missing":
-            act = tk.Label(line, text="실적 넣기", font=F(9), bg=C_BG, fg=C_PRIMARY, cursor="hand2")
-            act.pack(side="left", padx=(0, 10))
-            act.bind("<Button-1>", lambda e: do_fill_result(r, act, tag))
-        cp = tk.Label(line, text="복사", font=F(9), bg=C_BG, fg=C_PRIMARY, cursor="hand2")
-        cp.pack(side="left")
-        cp.bind("<Button-1>", lambda e: copy_text("\n".join(person_block(r, kind)), f"{r['성명']} 님 내용을 복사했어요."))
-
-    def do_fill_result(r, act, tag):
-        """점검 결과의 실적 미입력 어르신: 그날 실적 없는 지난 일정에 실적을 넣는다 (카톡 '실적' 요청과 같은 처리)."""
-        if busy["v"]:
-            set_progress(prog["value"], "다른 작업이 진행 중이에요. 끝난 뒤에 눌러 주세요.", True)
-            return
-        busy["v"] = True
-        act.configure(text="처리 중...", cursor="arrow")
-        act.unbind("<Button-1>")
-        name, ic, day = r["성명"], r["생활지원사"], state["day"]
-
-        def work():
-            try:
-                ok, msg = fill_result(ic, name, day)
-            finally:
-                busy["v"] = False
-
-            def done():
-                if ok:
-                    tag.configure(text="실적 넣음", bg="#DCFCE7", fg="#166534")
-                    act.configure(text="")
-                    set_progress(prog["value"], f"{name} 어르신 실적을 넣었어요.")
-                else:
-                    act.configure(text="다시 시도", cursor="hand2")
-                    act.bind("<Button-1>", lambda e: do_fill_result(r, act, tag))
-                    set_progress(prog["value"], f"{name}: {msg}", True)
-            ui(done)
-        threading.Thread(target=work, daemon=True).start()
-
-    def show_results(data):
-        state.update(missing=data["missing"], absent=data["absent_reg"], report=data["report"], day=data["day"])
-        fill_metrics(data)
-        for w in inner.winfo_children():
-            w.destroy()
-        items = [(r, "missing") for r in data["missing"]] + [(r, "absent") for r in data["absent_reg"]]
-        if not items:
-            tk.Label(inner, text="모든 이용자에게 실적이 들어가 있고, 장기부재자 실적도 없어요.",
-                     font=F(10), bg=C_BG, fg="#166534", pady=40).pack(fill="x")
-        for i, (r, kind) in enumerate(items):
-            add_row(r, kind, i == 0)
-        list_title.configure(text=f"실적 확인이 필요한 사람 ({len(items)}명)")
-        canvas.yview_moveto(0)
-
-    def do_open():
-        if busy["v"]:
-            return
-        busy["v"] = True
-        btn_check.set_enabled(False)
-        settings_note("크롬 창을 여는 중...")
-
-        def work():
-            try:
-                ok, msg = open_chrome_window()
-                ui(lambda: settings_note(msg, not ok))
-            finally:
-                busy["v"] = False
-                ui(lambda: btn_check.set_enabled(True))
-                ui(refresh_status)
-        threading.Thread(target=work, daemon=True).start()
-
-    def do_check():
-        if busy["v"]:
-            return
-        busy["v"] = True
-        btn_check.set_enabled(False)
-        set_progress(2, "점검을 시작해요...")
-
-        def work():
-            try:
-                t0 = time.time()
-                data = run_daily_check(lambda m: None, lambda p, m: ui(lambda: set_progress(p, m)))
-                ui(lambda: show_results(data))
-                ui(lambda: set_progress(100, f"완료 · 통계 {data['n_stats']}건 읽음 · {time.time() - t0:.0f}초"))
-                ui(refresh_status)
-            except NeedLogin as e:
-                msg = str(e)
-                ui(lambda: set_progress(0, msg, True))
-            except Exception as e:
-                msg = f"문제가 생겼어요: {e}"
-                ui(lambda: set_progress(0, msg, True))
-            finally:
-                busy["v"] = False
-                schedule_chrome_close()
-                ui(lambda: btn_check.set_enabled(True))
-        threading.Thread(target=work, daemon=True).start()
-
-    def refresh_status():
-        if busy["v"] or busy["poll"]:
-            return
-        busy["poll"] = True
-
-        def work():
-            try:
-                kind = check_status()
-            except Exception:
-                kind = "off"
-            busy["poll"] = False
-            ui(lambda: set_status(kind))
-        threading.Thread(target=work, daemon=True).start()
-
-    def poll_status():
-        refresh_status()
-        root.after(8000, poll_status)
-
-    # ---- 업데이트: 새 버전이 있으면 깜빡이는 '업데이트' 버튼이 나타남
-    def blink():
-        if upd["btn"] is None or upd["running"]:
-            return
-        upd["on"] = not upd["on"]
-        upd["btn"].KINDS["update"] = ("#15803D" if upd["on"] else "#166534", "#166534", "#FFFFFF", None)
-        upd["btn"]._draw()
-        root.after(600, blink)
-
-    def show_update_button(info):
-        upd["info"] = info
-        if upd["btn"] is None:
-            upd["btn"] = RoundButton(head_right, "업데이트", do_update, kind="update", height=30, padx=14, size=9)
-            upd["btn"].pack()
-            blink()
-
-    def check_update():  # 켤 때 한 번 확인
-        try:
-            info = fetch_latest_release()
-        except Exception:
-            return
-        if info and _parse_version(info["version"]) > _parse_version(APP_VERSION):
-            ui(lambda: show_update_button(info))
-
-    def do_update():
-        info = upd["info"]
-        if info is None or upd["running"]:
-            return
-        if busy["v"]:
-            messagebox.showinfo("업데이트", "점검이 끝난 뒤에 업데이트해 주세요.")
-            return
-        if not IS_EXE or not info.get("asset_url"):
-            if messagebox.askyesno("업데이트", f"새 버전 v{info['version']}이(가) 있습니다.\n다운로드 페이지를 열까요?"):
-                import webbrowser
-                webbrowser.open(info["page_url"])
-            return
-        if not messagebox.askyesno(
-                "업데이트", f"새 버전 v{info['version']}이(가) 있습니다. (지금 v{APP_VERSION})\n"
-                            "지금 업데이트할까요? 끝나면 프로그램이 다시 켜집니다."):
-            return
-        upd["running"] = True
-        upd["btn"].set_text("업데이트 중...")
-        upd["btn"].set_enabled(False)
-        btn_check.set_enabled(False)
-
-        def work():
-            try:
-                relocated = download_and_install_update(
-                    info, lambda p: ui(lambda: set_progress(p, f"업데이트 받는 중... {p}%")))
-            except Exception as e:
-                err = update_error_text(e)
-
-                def failed():
-                    upd["running"] = False
-                    upd["btn"].set_text("업데이트")
-                    upd["btn"].set_enabled(True)
-                    btn_check.set_enabled(True)
-                    set_progress(0, "업데이트하지 못했어요. " + err, True)
-                    blink()
-                ui(failed)
-                return
-            def done():
-                if relocated:
-                    messagebox.showinfo(
-                        "업데이트", "지금 폴더에는 파일을 바꿀 권한이 없어서, 관리자 권한 없이 쓸 수 있는 곳에 "
-                                    "새 버전을 설치했어요.\n앞으로는 바탕화면의 '맞춤돌봄도우미' 바로가기로 실행해 주세요.")
-                root.destroy()
-                os._exit(0)
-            ui(done)
-        threading.Thread(target=work, daemon=True).start()
-
-    def on_close():
-        # 백그라운드 크롬은 눈에 안 보이니 프로그램을 닫을 때 같이 끈다
-        cancel_chrome_close()
-        kill_hidden_chrome_now()  # 기다리지 않음 (창이 바로 닫히게)
-        root.destroy()
-
-    root.protocol("WM_DELETE_WINDOW", on_close)
-    _idle["busy"] = lambda: busy["v"]
-    show_page("daily")
-    set_status("check")
-    threading.Thread(target=check_update, daemon=True).start()
-    root.after(300, poll_status)
-    if "--auto" in sys.argv:  # 시험용: 켜자마자 점검 시작
-        root.after(1500, do_check)
-    root.mainloop()
 
 
 if __name__ == "__main__":
@@ -1644,37 +1116,18 @@ if __name__ == "__main__":
             if chrome_mode() == "hidden":  # 창 없는 실행은 끝나면 바로 끈다
                 close_chrome()
     else:
-        started = False
-        try:  # 빌드할 때 화면 방식을 정해 넣을 수 있다 (Nuitka 시험판은 tkinter 화면이 기본)
-            import _build_flags
-            if getattr(_build_flags, "UI", "") == "tk" and not ({"--web", "--classic"} & set(sys.argv)):
-                sys.argv.append("--tk")
-        except ImportError:
-            pass
-        if "--tk" in sys.argv:  # WebView 없이 tkinter 로 그린 새 화면
+        try:
+            import tkui
+            tkui.start(sys.modules[__name__])
+        except Exception:
+            # 화면이 켜지지 않으면 이유를 파일로 남기고 알려 준다 (tkinter 가 안 될 수도 있어 윈도우 기본 알림 창으로)
+            path = os.path.join(APP_DATA_DIR, "화면오류.log")
             try:
-                import tkui
-                started = tkui.start(sys.modules[__name__])
-            except Exception:
-                # 새 화면이 켜지다 실패해도 프로그램은 켜지게: 오류는 파일로 남기고 기본 화면으로
-                try:
-                    os.makedirs(APP_DATA_DIR, exist_ok=True)
-                    with open(os.path.join(APP_DATA_DIR, "화면오류.log"), "w", encoding="utf-8") as f:
-                        f.write(traceback.format_exc())
-                except OSError:
-                    pass
-                try:  # 반쯤 만들어진 창이 남지 않게
-                    import tkinter
-                    if tkinter._default_root is not None:
-                        tkinter._default_root.destroy()
-                except Exception:
-                    pass
-                started = False
-        if not started and "--classic" not in sys.argv and "--tk" not in sys.argv:  # 웹 화면(WebView2)을 쓸 수 없으면 기본 화면으로
-            try:
-                import webui
-                started = webui.start(sys.modules[__name__])
-            except Exception:
-                started = False
-        if not started:
-            main_gui()
+                os.makedirs(APP_DATA_DIR, exist_ok=True)
+                with open(path, "w", encoding="utf-8") as f:
+                    f.write(traceback.format_exc())
+            except OSError:
+                pass
+            import ctypes
+            ctypes.windll.user32.MessageBoxW(None, "프로그램 화면을 열지 못했어요.\n\n오류 기록: " + path
+                                             + "\n이 파일을 담당자에게 보내 주세요.", APP_NAME, 0x10)

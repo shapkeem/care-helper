@@ -51,12 +51,6 @@ def load_roster(app, page, today, log):
     return rows
 
 
-def roster_path_for(day):
-    """그날 받은 대상자리스트 파일 경로 (없으면 None)."""
-    p = os.path.join(ROSTER_DIR, f"대상자리스트{day:%Y.%m.%d}.xls")
-    return p if os.path.exists(p) else None
-
-
 def _workers_path(day):
     return os.path.join(ROSTER_DIR, f"생활지원사명단{day:%Y.%m.%d}.json")
 
@@ -139,15 +133,6 @@ def ensure_daily_lists(app, log):
     for w in warns:
         log(f"[경고] {w}")
     return roster, workers, warns
-
-
-def workers_for(day):
-    import json
-    try:
-        with open(_workers_path(day), encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, ValueError):
-        return None
 
 
 def fetch_daily_lists(app, log):

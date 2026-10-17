@@ -369,24 +369,6 @@ def do_register(page, dlg, ic, person, d, frm, to, kind, log, now=None):
     return plan
 
 
-def do_result(page, dlg, ic, person, d, log, kind=None, frm=None, to=None, now=None):
-    """이미 있는 일정에 실적 등록. 시간이 없으면 실적 없는 지난 일정을 찾는다."""
-    y, mo = plan_month(d)
-    open_plan(page, ic, y, mo)
-    cands = [p for p in find_plans(page, person, d, frm, to, kind)
-             if not p["result"] and is_past(d, p["to"], now)]
-    close_layer(page)
-    if not cands:
-        raise WorkError(f"{person} {d:%m/%d} 에 실적이 없는 지난 일정이 없어요.")
-    if len(cands) > 1:
-        raise WorkError("실적 없는 일정이 여러 개예요: " + ", ".join(f"{p['from']}~{p['to']}" for p in cands))
-    p = cands[0]
-    open_result(page, person, ic, y, mo)
-    register_result(page, dlg, p["seq"], d)
-    log(f"실적 등록: {person} / {d:%m-%d} {p['from']}~{p['to']}")
-    return p
-
-
 def do_delete(page, dlg, ic, person, d, frm, to, log, kind=None):
     """(실적 있으면 실적 삭제 →) 일정 삭제."""
     y, mo = plan_month(d)

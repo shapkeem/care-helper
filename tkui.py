@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
-"""WebView 없이 tkinter 로 그린 화면. 웹 화면(ui/index.html)과 같은 기능을 같은 Api(webui.Api)로 쓴다.
-WebView2 화면은 약 300MB 를 더 쓰므로, 메모리를 아끼려고 이 화면을 쓴다."""
+"""프로그램 화면 (tkinter). 기능은 api.Api 로 부른다.
+예전 WebView2 웹 화면보다 메모리를 약 300MB 덜 쓴다."""
 import os
 import queue
 import sys
@@ -19,13 +19,81 @@ GOODEOS_TEXT = {"ok": "goodeos 로그인됨", "ok_hidden": "goodeos 로그인됨
                 "login": "goodeos 로그인 필요", "off": "크롬 꺼짐", "backup": "goodeos 백업 시간 (0~4시)"}
 
 
+C_BG = "#FFFFFF"
+C_CARD = "#F1F5F9"
+C_LINE = "#E2E8F0"
+C_TEXT = "#0F172A"
+C_MUTED = "#64748B"
+C_PRIMARY = "#2563EB"
+C_PRIMARY_H = "#1D4ED8"
+C_DANGER_BG = "#FEE2E2"
+C_DANGER = "#B91C1C"
+C_SIDE = "#F8FAFC"
+C_SIDE_HOVER = "#EEF2F6"
+C_SIDE_ON = "#E2E8F0"
+FONT = "맑은 고딕"
+
+
+def _round_button_class():
+    class RoundButton(tk.Canvas):
+        KINDS = {  # (평소, 마우스 올림, 글자, 테두리)
+            "primary": (C_PRIMARY, C_PRIMARY_H, "#FFFFFF", None),
+            "secondary": ("#FFFFFF", "#F1F5F9", C_TEXT, "#CBD5E1"),
+            "update": ("#15803D", "#166534", "#FFFFFF", None),
+        }
+
+        def __init__(self, master, text, command, kind="secondary", height=38, padx=18, size=10, bg=C_BG):
+            self._font = tkfont.Font(family=FONT, size=size, weight="bold")
+            self._kind, self._text, self._cmd = kind, text, command
+            self._h, self._padx, self._enabled, self._hover = height, padx, True, False
+            super().__init__(master, width=self._font.measure(text) + padx * 2, height=height,
+                             bg=bg, highlightthickness=0, cursor="hand2")
+            self.bind("<Enter>", lambda e: self._set_hover(True))
+            self.bind("<Leave>", lambda e: self._set_hover(False))
+            self.bind("<ButtonRelease-1>", self._click)
+            self._draw()
+
+        def _set_hover(self, v):
+            self._hover = v
+            self._draw()
+
+        def _click(self, _e):
+            if self._enabled and self._cmd:
+                self._cmd()
+
+        def _draw(self):
+            fill, hover, fg, line = self.KINDS[self._kind]
+            if not self._enabled:
+                fill, fg, line = "#E2E8F0", "#94A3B8", None
+            elif self._hover:
+                fill = hover
+            w, h, r = int(self["width"]), self._h, self._h / 2
+            self.delete("all")
+            x1, y1, x2, y2 = 1, 1, w - 1, h - 1
+            pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+                   x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+            self.create_polygon(pts, smooth=True, fill=fill, outline=line or fill)
+            self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=self._font)
+
+        def set_text(self, text):
+            self._text = text
+            self.configure(width=self._font.measure(text) + self._padx * 2)
+            self._draw()
+
+        def set_enabled(self, v):
+            self._enabled = v
+            self.configure(cursor="hand2" if v else "arrow")
+            self._draw()
+
+    return RoundButton
+
+
 class TkUI:
     def __init__(self, app):
-        import webui
+        import api
         self.app = app
         self.q = queue.Queue()
-        self.api = webui.Api(app)
-        self.api._emit = lambda ev, data=None: self.q.put((ev, data))  # 작업 스레드 → 화면 (큐로 넘김)
+        self.api = api.Api(app, lambda ev, data=None: self.q.put((ev, data)))  # 작업 스레드 → 화면 (큐로 넘김)
         try:
             import ctypes
             ctypes.windll.shcore.SetProcessDpiAwareness(1)
@@ -40,19 +108,19 @@ class TkUI:
         root.title(app.APP_NAME)
         root.geometry("1040x820")
         root.minsize(900, 640)
-        root.configure(bg=app.C_BG)
+        root.configure(bg=C_BG)
         try:  # 창·작업표시줄 아이콘 (안 하면 tkinter 기본 깃털이 나온다)
             root.iconbitmap(default=os.path.join(app.RES_DIR, "icon.ico"))
         except Exception:
             pass
-        self.RB = app._make_round_button_class(tk, tkfont)
+        self.RB = _round_button_class()
         style = ttk.Style()
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("Thin.Horizontal.TProgressbar", troughcolor=app.C_CARD, background=app.C_PRIMARY,
-                        bordercolor=app.C_CARD, lightcolor=app.C_PRIMARY, darkcolor=app.C_PRIMARY, thickness=4)
+        style.configure("Thin.Horizontal.TProgressbar", troughcolor=C_CARD, background=C_PRIMARY,
+                        bordercolor=C_CARD, lightcolor=C_PRIMARY, darkcolor=C_PRIMARY, thickness=4)
         self.scrollers = {}  # 마우스 휠로 움직일 캔버스
         self.pages, self.nav = {}, {}
         self.cur = None
@@ -60,11 +128,11 @@ class TkUI:
 
     # ---------------------------------------------------------------- 공통 부품
     def F(self, size, bold=False):
-        return tkfont.Font(family=self.app.FONT, size=size, weight="bold" if bold else "normal")
+        return tkfont.Font(family=FONT, size=size, weight="bold" if bold else "normal")
 
     def label(self, parent, text="", size=10, bold=False, fg=None, bg=None, **kw):
-        return tk.Label(parent, text=text, font=self.F(size, bold), fg=fg or self.app.C_TEXT,
-                        bg=bg or self.app.C_BG, anchor="w", justify="left", **kw)
+        return tk.Label(parent, text=text, font=self.F(size, bold), fg=fg or C_TEXT,
+                        bg=bg or C_BG, anchor="w", justify="left", **kw)
 
     def button(self, parent, text, cmd, primary=False, small=False):
         return self.RB(parent, text, cmd, kind="primary" if primary else "secondary",
@@ -75,40 +143,50 @@ class TkUI:
         btn._draw()
 
     def link(self, parent, text, cmd):
-        lab = tk.Label(parent, text=text, font=self.F(9), fg=self.app.C_PRIMARY, bg=self.app.C_BG, cursor="hand2")
+        lab = tk.Label(parent, text=text, font=self.F(9), fg=C_PRIMARY, bg=C_BG, cursor="hand2")
         lab.bind("<Button-1>", lambda e: cmd())
         return lab
 
     def badge(self, parent, text, kind=None):
-        bg, fg = BADGE[kind or STATUS_BADGE.get(text, "idle")]
-        return tk.Label(parent, text=text, font=self.F(8), bg=bg, fg=fg, padx=8, pady=1)
+        """둥근 상태 표시 (완료·실패 등). 라벨은 모서리를 둥글게 못 해서 캔버스에 그린다."""
+        c = tk.Canvas(parent, height=20, width=10, bg=parent.cget("bg"), highlightthickness=0)
+        c.font = self.F(8, True)
+        self.set_badge(c, text, kind)
+        return c
 
-    def set_badge(self, lab, text, kind=None):
+    def set_badge(self, c, text, kind=None):
         bg, fg = BADGE[kind or STATUS_BADGE.get(text, "idle")]
-        lab.configure(text=text, bg=bg, fg=fg)
+        w, h = c.font.measure(text) + 18, 20
+        c.configure(width=w)
+        c.delete("all")
+        if text:
+            r = h / 2
+            pts = [r, 0, w - r, 0, w, 0, w, r, w, h - r, w, h, w - r, h, r, h, 0, h, 0, h - r, 0, r, 0, 0]
+            c.create_polygon(pts, smooth=True, fill=bg, outline=bg)
+            c.create_text(w / 2, h / 2, text=text, fill=fg, font=c.font)
 
     def head(self, page, title, sub):
-        h = tk.Frame(page, bg=self.app.C_BG)
+        h = tk.Frame(page, bg=C_BG)
         h.pack(fill="x", pady=(0, 10))
-        acts = tk.Frame(h, bg=self.app.C_BG)  # 버튼 자리를 먼저 잡아서 설명 글이 길어도 버튼이 잘리지 않게
+        acts = tk.Frame(h, bg=C_BG)  # 버튼 자리를 먼저 잡아서 설명 글이 길어도 버튼이 잘리지 않게
         acts.pack(side="right", anchor="n")
-        t = tk.Frame(h, bg=self.app.C_BG)
+        t = tk.Frame(h, bg=C_BG)
         t.pack(side="left", fill="x", expand=True)
         self.label(t, title, 17, True).pack(anchor="w")
-        sub_lab = self.label(t, sub, 10, fg=self.app.C_MUTED, wraplength=400)
+        sub_lab = self.label(t, sub, 10, fg=C_MUTED, wraplength=400)
         sub_lab.pack(anchor="w", fill="x")
         t.bind("<Configure>", lambda e: sub_lab.configure(wraplength=max(200, e.width - 10)))
         return acts, sub_lab
 
     def scroll_list(self, parent, height=None):
         """테두리 있는 스크롤 목록. → 안쪽 프레임"""
-        wrap = tk.Frame(parent, bg=self.app.C_BG, highlightbackground=self.app.C_LINE, highlightthickness=1)
-        canvas = tk.Canvas(wrap, bg=self.app.C_BG, highlightthickness=0, height=height or 200)
+        wrap = tk.Frame(parent, bg=C_BG, highlightbackground=C_LINE, highlightthickness=1)
+        canvas = tk.Canvas(wrap, bg=C_BG, highlightthickness=0, height=height or 200)
         sb = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview)
         canvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y")
         canvas.pack(side="left", fill="both", expand=True)
-        inner = tk.Frame(canvas, bg=self.app.C_BG)
+        inner = tk.Frame(canvas, bg=C_BG)
         wid = canvas.create_window((0, 0), window=inner, anchor="nw")
         inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
         canvas.bind("<Configure>", lambda e: canvas.itemconfig(wid, width=e.width))
@@ -122,14 +200,14 @@ class TkUI:
 
     def empty(self, frame, text, good=False):
         self.clear(frame)
-        self.label(frame, text, 10, fg="#166534" if good else self.app.C_MUTED, pady=30).pack(fill="x", padx=14)
+        self.label(frame, text, 10, fg="#166534" if good else C_MUTED, pady=30).pack(fill="x", padx=14)
 
     def logbox(self, parent, height=6):
-        t = tk.Text(parent, height=height, font=self.F(9), bg="#F8FAFC", fg=self.app.C_TEXT, relief="flat",
-                    highlightbackground=self.app.C_LINE, highlightthickness=1, wrap="word", padx=8, pady=6)
-        t.tag_configure("e", foreground=self.app.C_DANGER)
+        t = tk.Text(parent, height=height, font=self.F(9), bg="#F8FAFC", fg=C_TEXT, relief="flat",
+                    highlightbackground=C_LINE, highlightthickness=1, wrap="word", padx=8, pady=6)
+        t.tag_configure("e", foreground=C_DANGER)
         t.tag_configure("s", foreground="#166534")
-        t.tag_configure("m", foreground=self.app.C_MUTED)
+        t.tag_configure("m", foreground=C_MUTED)
         t.configure(state="disabled")
         return t
 
@@ -180,27 +258,27 @@ class TkUI:
     # ---------------------------------------------------------------- 뼈대
     def build(self):
         a, root = self.app, self.root
-        side = tk.Frame(root, bg=a.C_SIDE, width=210)
+        side = tk.Frame(root, bg=C_SIDE, width=210)
         side.pack(side="left", fill="y")
         side.pack_propagate(False)
-        tk.Frame(root, bg=a.C_LINE, width=1).pack(side="left", fill="y")
-        self.content = tk.Frame(root, bg=a.C_BG)
+        tk.Frame(root, bg=C_LINE, width=1).pack(side="left", fill="y")
+        self.content = tk.Frame(root, bg=C_BG)
         self.content.pack(side="left", fill="both", expand=True)
-        self.label(side, "맞춤돌봄도우미", 13, True, bg=a.C_SIDE, padx=18, pady=18).pack(fill="x")
+        self.label(side, "맞춤돌봄도우미", 13, True, bg=C_SIDE, padx=18, pady=18).pack(fill="x")
         for key, text in (("daily", "일일실적 점검"), ("kakao", "카톡 요청 처리"), ("conv", "제공계획서 변환"),
                           ("scare", "서비스 제공계획 입력")):
             self.nav_item(side, key, text)
-        bottom = tk.Frame(side, bg=a.C_SIDE)
+        bottom = tk.Frame(side, bg=C_SIDE)
         bottom.pack(side="bottom", fill="x", pady=(0, 14))
-        tk.Frame(bottom, bg=a.C_LINE, height=1).pack(fill="x", pady=(0, 8))
+        tk.Frame(bottom, bg=C_LINE, height=1).pack(fill="x", pady=(0, 8))
         self.nav_item(bottom, "settings", "설정")
         self.pill = tk.Label(bottom, font=self.F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=170,
-                             text="●  상태 확인 중...", bg=a.C_CARD, fg=a.C_MUTED)
+                             text="●  상태 확인 중...", bg=C_CARD, fg=C_MUTED)
         self.pill.pack(anchor="w", padx=18, pady=(8, 2))
         self.pill2 = tk.Label(bottom, font=self.F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=170)
         self.upd_btn = self.RB(bottom, "업데이트", self.do_update, kind="update", height=30, padx=14, size=9,
-                               bg=a.C_SIDE)
-        self.ver = self.label(bottom, f"v{a.APP_VERSION}", 8, fg=a.C_MUTED, bg=a.C_SIDE)
+                               bg=C_SIDE)
+        self.ver = self.label(bottom, f"v{a.APP_VERSION}", 8, fg=C_MUTED, bg=C_SIDE)
         self.ver.pack(anchor="w", padx=22, pady=(6, 0))
         self.build_daily()
         self.build_kakao()
@@ -209,25 +287,23 @@ class TkUI:
         self.build_settings()
 
     def nav_item(self, parent, key, text):
-        a = self.app
-        lab = tk.Label(parent, text=text, font=self.F(10), bg=a.C_SIDE, fg=a.C_MUTED, anchor="w",
+        lab = tk.Label(parent, text=text, font=self.F(10), bg=C_SIDE, fg=C_MUTED, anchor="w",
                        padx=14, pady=8, cursor="hand2")
         lab.pack(fill="x", padx=8, pady=1)
         lab.bind("<Button-1>", lambda e: self.show(key))
-        lab.bind("<Enter>", lambda e: self.cur != key and lab.configure(bg=a.C_SIDE_HOVER))
-        lab.bind("<Leave>", lambda e: self.cur != key and lab.configure(bg=a.C_SIDE))
+        lab.bind("<Enter>", lambda e: self.cur != key and lab.configure(bg=C_SIDE_HOVER))
+        lab.bind("<Leave>", lambda e: self.cur != key and lab.configure(bg=C_SIDE))
         self.nav[key] = lab
 
     def page(self, key):
-        p = tk.Frame(self.content, bg=self.app.C_BG)
+        p = tk.Frame(self.content, bg=C_BG)
         self.pages[key] = p
         return p
 
     def show(self, key):
-        a = self.app
         for k, lab in self.nav.items():
             on = k == key
-            lab.configure(bg=a.C_SIDE_ON if on else a.C_SIDE, fg=a.C_TEXT if on else a.C_MUTED, font=self.F(10, on))
+            lab.configure(bg=C_SIDE_ON if on else C_SIDE, fg=C_TEXT if on else C_MUTED, font=self.F(10, on))
         for k, p in self.pages.items():
             if k != key:
                 p.pack_forget()
@@ -238,29 +314,28 @@ class TkUI:
 
     # ---------------------------------------------------------------- 일일실적 점검
     def build_daily(self):
-        a = self.app
         p = self.page("daily")
         acts, self.d_sub = self.head(p, "일일실적 점검", "")
         self.d_btn = self.button(acts, "점검 시작", self.d_check, primary=True)
         self.d_btn.pack()
-        self.d_prog = self.label(p, "준비됐어요. 점검 시작을 눌러 주세요.", 9, fg=a.C_MUTED)
+        self.d_prog = self.label(p, "준비됐어요. 점검 시작을 눌러 주세요.", 9, fg=C_MUTED)
         self.d_prog.pack(fill="x")
         self.d_bar = ttk.Progressbar(p, style="Thin.Horizontal.TProgressbar", maximum=100)
         self.d_bar.pack(fill="x", pady=(4, 12))
-        cards = tk.Frame(p, bg=a.C_BG)
+        cards = tk.Frame(p, bg=C_BG)
         cards.pack(fill="x")
         self.d_metric = {}
         for i, (key, text) in enumerate((("users", "이용자"), ("absent", "장기부재"), ("missing", "실적 미입력"),
                                          ("absentReg", "장기부재 실적"))):
             cards.columnconfigure(i, weight=1, uniform="m")
-            box = tk.Frame(cards, bg=a.C_CARD, padx=12, pady=8)
+            box = tk.Frame(cards, bg=C_CARD, padx=12, pady=8)
             box.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 5, 0 if i == 3 else 5))
-            l1 = self.label(box, text, 9, fg=a.C_MUTED, bg=a.C_CARD)
+            l1 = self.label(box, text, 9, fg=C_MUTED, bg=C_CARD)
             l1.pack(fill="x")
-            n = self.label(box, "-", 20, bg=a.C_CARD)
+            n = self.label(box, "-", 20, bg=C_CARD)
             n.pack(fill="x")
             self.d_metric[key] = (box, l1, n)
-        lh = tk.Frame(p, bg=a.C_BG)
+        lh = tk.Frame(p, bg=C_BG)
         lh.pack(fill="x", pady=(14, 4))
         self.d_title = self.label(lh, "실적 확인이 필요한 사람", 11, True)
         self.d_title.pack(side="left")
@@ -274,7 +349,7 @@ class TkUI:
     def d_set(self, pct, msg, err=False):
         if pct is not None:
             self.d_bar["value"] = pct
-        self.d_prog.configure(text=msg, fg=self.app.C_DANGER if err else self.app.C_MUTED)
+        self.d_prog.configure(text=msg, fg=C_DANGER if err else C_MUTED)
 
     def d_check(self):
         err = self.api.check()
@@ -285,17 +360,16 @@ class TkUI:
         self.d_set(2, "점검을 시작해요...")
 
     def d_show(self, d):
-        a = self.app
         self.d_btn.set_enabled(True)
         self.d_set(100, f"완료 · 통계 {d['stats']}건 읽음")
         for key, (box, l1, n) in self.d_metric.items():
             v = d[key]
             hot = key == "missing" and v > 0
-            bg = a.C_DANGER_BG if hot else a.C_CARD
+            bg = C_DANGER_BG if hot else C_CARD
             for w in (box, l1, n):
                 w.configure(bg=bg)
-            n.configure(text=str(v), fg=a.C_DANGER if hot else a.C_TEXT)
-            l1.configure(fg=a.C_DANGER if hot else a.C_MUTED)
+            n.configure(text=str(v), fg=C_DANGER if hot else C_TEXT)
+            l1.configure(fg=C_DANGER if hot else C_MUTED)
         self.d_title.configure(text=f"실적 확인이 필요한 사람 ({len(d['rows'])}명)")
         if d["missing"] > 0:
             self.d_fillall.pack(side="right", padx=(0, 6))
@@ -308,11 +382,11 @@ class TkUI:
             self.empty(self.d_list, "모든 이용자에게 실적이 들어가 있고, 장기부재자 실적도 없어요.", good=True)
         for i, r in enumerate(d["rows"]):
             if i:
-                tk.Frame(self.d_list, bg=a.C_LINE, height=1).pack(fill="x")
-            line = tk.Frame(self.d_list, bg=a.C_BG, padx=12, pady=7)
+                tk.Frame(self.d_list, bg=C_LINE, height=1).pack(fill="x")
+            line = tk.Frame(self.d_list, bg=C_BG, padx=12, pady=7)
             line.pack(fill="x")
             self.label(line, r["name"], 10, True, width=8).pack(side="left")
-            self.label(line, f"담당 {r['ic']} · {r['phone']}", 9, fg=a.C_MUTED).pack(side="left", fill="x", expand=True)
+            self.label(line, f"담당 {r['ic']} · {r['phone']}", 9, fg=C_MUTED).pack(side="left", fill="x", expand=True)
             tag = self.badge(line, "미입력" if r["kind"] == "missing" else "장기부재 실적", "err")
             tag.pack(side="left", padx=8)
             fill = None
@@ -320,7 +394,7 @@ class TkUI:
                 fill = self.link(line, "실적 넣기", lambda i=r["idx"]: self.d_fill(i))
                 fill.pack(side="left", padx=(0, 10))
             self.link(line, "복사", lambda i=r["idx"]: self.toast(self.api.copy_person(i))).pack(side="left")
-            why = self.label(line, "", 9, fg=a.C_DANGER, wraplength=260)
+            why = self.label(line, "", 9, fg=C_DANGER, wraplength=260)
             why.pack(side="left", padx=(10, 0))
             self.d_rows[r["idx"]] = {"tag": tag, "fill": fill, "why": why}
         self.d_list.canvas.yview_moveto(0)
@@ -369,16 +443,15 @@ class TkUI:
 
     # ---------------------------------------------------------------- 카톡 요청 처리
     def build_kakao(self):
-        a = self.app
         p = self.page("kakao")
         acts, _ = self.head(p, "카톡 요청 처리", "생활지원사 카톡을 붙여넣으면 알아서 처리해요. 애매한 건 물어볼게요.")
         self.k_start_btn = self.button(acts, "처리 시작", self.k_start, primary=True)
         self.k_start_btn.pack(side="right")
         self.button(acts, "멈춤", self.api.kakao_stop).pack(side="right", padx=(0, 6))
-        self.label(p, "예) [이미화생지사1동] [오후 2:01] 장귀현 어르신 방문 실행 부탁드립니다", 9, fg=a.C_MUTED).pack(fill="x")
+        self.label(p, "예) [이미화생지사1동] [오후 2:01] 장귀현 어르신 방문 실행 부탁드립니다", 9, fg=C_MUTED).pack(fill="x")
         self.k_text = tk.Text(p, height=6, font=self.F(10), relief="solid", bd=1, wrap="word", padx=8, pady=6)
         self.k_text.pack(fill="x", pady=(2, 6))
-        self.k_status = self.label(p, "", 9, fg=a.C_MUTED)
+        self.k_status = self.label(p, "", 9, fg=C_MUTED)
         self.k_status.pack(fill="x")
         self.k_q = tk.Frame(p, bg="#EFF6FF", padx=12, pady=10, highlightbackground="#BFDBFE", highlightthickness=1)
         self.k_qtext = self.label(self.k_q, "", 10, True, bg="#EFF6FF", wraplength=700)
@@ -393,10 +466,10 @@ class TkUI:
         self.button(row, "건너뛰기", lambda: self.k_answer(None), small=True).pack(side="right", padx=(6, 0))
         self.button(row, "답하기", self.k_send, primary=True, small=True).pack(side="right", padx=(6, 0))
         self.k_table_wrap, self.k_table = self.scroll_list(p)
-        hdr = self.k_hdr = tk.Frame(p, bg=a.C_CARD)
+        hdr = self.k_hdr = tk.Frame(p, bg=C_CARD)
         hdr.pack(fill="x", pady=(8, 0))
         for text, w in (("요청", 40), ("상태", 10), ("메모", 30)):
-            self.label(hdr, text, 9, fg=a.C_MUTED, bg=a.C_CARD, width=w, padx=8, pady=4).pack(side="left")
+            self.label(hdr, text, 9, fg=C_MUTED, bg=C_CARD, width=w, padx=8, pady=4).pack(side="left")
         self.k_table_wrap.pack(fill="both", expand=True)
         self.empty(self.k_table, "처리할 요청이 여기에 나와요.")
         self.k_rows = {}
@@ -413,19 +486,18 @@ class TkUI:
         self.log_clear(self.k_log)
 
     def k_row(self, r):
-        a = self.app
         row = self.k_rows.get(r["id"])
         if row is None:
             if not self.k_rows:
                 self.clear(self.k_table)
-            line = tk.Frame(self.k_table, bg=a.C_BG, padx=8, pady=6)
+            line = tk.Frame(self.k_table, bg=C_BG, padx=8, pady=6)
             line.pack(fill="x")
-            tk.Frame(self.k_table, bg=a.C_LINE, height=1).pack(fill="x")
+            tk.Frame(self.k_table, bg=C_LINE, height=1).pack(fill="x")
             lab = self.label(line, "", 9, width=46, wraplength=330)
             lab.pack(side="left")
             st = self.badge(line, "")
             st.pack(side="left", padx=8)
-            note = self.label(line, "", 9, fg=a.C_MUTED, wraplength=330)
+            note = self.label(line, "", 9, fg=C_MUTED, wraplength=330)
             note.pack(side="left", fill="x", expand=True)
             row = self.k_rows[r["id"]] = (lab, st, note)
         lab, st, note = row
@@ -465,7 +537,6 @@ class TkUI:
 
     # ---------------------------------------------------------------- 제공계획서 변환
     def build_conv(self):
-        a = self.app
         p = self.page("conv")
         acts, _ = self.head(p, "제공계획서 변환",
                             "바탕화면 '제공계획서 작업전' 엑셀을 정리·검사해서 '작업후' 폴더에 저장하고 통합본을 만들어요.")
@@ -475,15 +546,15 @@ class TkUI:
         self.c_start.pack(side="right", padx=(0, 6))
         self.button(acts, "결과 폴더", lambda: self.api.conv_open("dst")).pack(side="right", padx=(0, 6))
         self.button(acts, "작업전 폴더", lambda: self.api.conv_open("src")).pack(side="right", padx=(0, 6))
-        cards = tk.Frame(p, bg=a.C_BG)
+        cards = tk.Frame(p, bg=C_BG)
         cards.pack(fill="x")
         self.c_metric = {}
         for i, (key, text) in enumerate((("src", "작업전 파일"), ("roster", "대상자리스트"), ("workers", "생활지원사 명단"))):
             cards.columnconfigure(i, weight=1, uniform="c")
-            box = tk.Frame(cards, bg=a.C_CARD, padx=12, pady=8)
+            box = tk.Frame(cards, bg=C_CARD, padx=12, pady=8)
             box.grid(row=0, column=i, sticky="ew", padx=(0 if i == 0 else 5, 0 if i == 2 else 5))
-            self.label(box, text, 9, fg=a.C_MUTED, bg=a.C_CARD).pack(fill="x")
-            n = self.label(box, "-", 16, bg=a.C_CARD)
+            self.label(box, text, 9, fg=C_MUTED, bg=C_CARD).pack(fill="x")
+            n = self.label(box, "-", 16, bg=C_CARD)
             n.pack(fill="x")
             self.c_metric[key] = n
         self.c_warn = self.label(p, "", 9, fg="#92400E", bg="#FEF3C7", padx=10, pady=6, wraplength=720)
@@ -491,9 +562,9 @@ class TkUI:
         self.c_left_text = self.label(self.c_left, "", 9, fg="#92400E", bg="#FEF3C7")
         self.c_left_text.pack(side="left")
         self.RB(self.c_left, "휴지통으로", self.c_clear_left, height=26, padx=10, size=8, bg="#FEF3C7").pack(side="right")
-        self.c_anchor = tk.Frame(p, bg=a.C_BG)  # 알림 줄들이 들어갈 자리
+        self.c_anchor = tk.Frame(p, bg=C_BG)  # 알림 줄들이 들어갈 자리
         self.c_anchor.pack(fill="x")
-        self.c_prog = self.label(p, "변환 시작을 누르면 시작해요.", 9, fg=a.C_MUTED)
+        self.c_prog = self.label(p, "변환 시작을 누르면 시작해요.", 9, fg=C_MUTED)
         self.c_prog.pack(fill="x", pady=(8, 0))
         self.c_bar = ttk.Progressbar(p, style="Thin.Horizontal.TProgressbar", maximum=100)
         self.c_bar.pack(fill="x", pady=(4, 8))
@@ -506,7 +577,7 @@ class TkUI:
         self.c_log.pack(fill="both", expand=True)
 
     def c_set(self, msg, err=False):
-        self.c_prog.configure(text=msg, fg=self.app.C_DANGER if err else self.app.C_MUTED)
+        self.c_prog.configure(text=msg, fg=C_DANGER if err else C_MUTED)
 
     def conv_refresh(self):
         def got(s):
@@ -514,7 +585,7 @@ class TkUI:
                 return
             self.c_metric["src"].configure(text=f"{s['srcCount']}개")
             for key, txt, fresh in (("roster", s["roster"], s["rosterToday"]), ("workers", s["workers"], s["workersToday"])):
-                self.c_metric[key].configure(text=txt or "없음", fg="#166534" if fresh else self.app.C_DANGER)
+                self.c_metric[key].configure(text=txt or "없음", fg="#166534" if fresh else C_DANGER)
             if s["leftovers"]:
                 self.c_left_text.configure(text=f"'작업후' 폴더에 이전에 변환된 파일 {s['leftovers']}개가 남아 있어요.")
                 self.c_left.pack(fill="x", pady=(8, 0), in_=self.c_anchor)
@@ -576,24 +647,22 @@ class TkUI:
 
     # 수정 제안 검토
     def build_review(self, p):
-        a = self.app
-        box = tk.Frame(p, bg=a.C_BG, highlightbackground="#93C5FD", highlightthickness=2, padx=10, pady=8)
-        top = tk.Frame(box, bg=a.C_BG)
+        box = tk.Frame(p, bg=C_BG, highlightbackground="#93C5FD", highlightthickness=2, padx=10, pady=8)
+        top = tk.Frame(box, bg=C_BG)
         top.pack(fill="x")
         self.label(top, "수정 제안 검토", 11, True).pack(side="left")
-        self.label(top, "  체크한 항목만 고쳐요. 수정값을 누르면 직접 고칠 수 있어요.", 9, fg=a.C_MUTED).pack(side="left")
+        self.label(top, "  체크한 항목만 고쳐요. 수정값을 누르면 직접 고칠 수 있어요.", 9, fg=C_MUTED).pack(side="left")
         wrap, self.rv_list = self.scroll_list(box, height=240)
         wrap.pack(fill="both", expand=True, pady=6)
-        foot = tk.Frame(box, bg=a.C_BG)
+        foot = tk.Frame(box, bg=C_BG)
         foot.pack(fill="x")
-        self.rv_count = self.label(foot, "", 9, fg=a.C_MUTED)
+        self.rv_count = self.label(foot, "", 9, fg=C_MUTED)
         self.rv_count.pack(side="left")
         self.button(foot, "체크한 항목 적용하고 계속", self.rv_apply, primary=True, small=True).pack(side="right")
         self.button(foot, "모두 건너뛰고 계속", self.rv_skip, small=True).pack(side="right", padx=(0, 6))
         return box
 
     def rv_show(self, props):
-        a = self.app
         self.rv = {"props": props, "on": {}, "val": {}}
         self.clear(self.rv_list)
         order = ["날짜", "시간겹침", "시간형식", "코드정리"]
@@ -604,21 +673,21 @@ class TkUI:
             if q["file"] != cur:
                 cur = q["file"]
                 n = sum(1 for x in props if x["file"] == cur)
-                self.label(self.rv_list, f"{cur}  ({n}건)", 9, True, bg=a.C_CARD, padx=8, pady=3).pack(fill="x")
+                self.label(self.rv_list, f"{cur}  ({n}건)", 9, True, bg=C_CARD, padx=8, pady=3).pack(fill="x")
             var = tk.BooleanVar(value=True)
             self.rv["on"][q["pid"]] = var
-            line = tk.Frame(self.rv_list, bg=a.C_BG, padx=6, pady=3)
+            line = tk.Frame(self.rv_list, bg=C_BG, padx=6, pady=3)
             line.pack(fill="x")
-            tk.Checkbutton(line, variable=var, bg=a.C_BG, command=self.rv_count_update).pack(side="left")
+            tk.Checkbutton(line, variable=var, bg=C_BG, command=self.rv_count_update).pack(side="left")
             self.badge(line, q["kind"], "run").pack(side="left", padx=(0, 6))
             self.label(line, f"{q['row']}행 {q['person']}", 9, width=14).pack(side="left")
-            self.label(line, q["current"], 9, fg=a.C_MUTED, width=14).pack(side="left")
-            self.label(line, "→", 9, fg=a.C_MUTED).pack(side="left", padx=4)
-            sug = tk.Label(line, text=q["suggested"], font=self.F(9, True), fg=a.C_PRIMARY, bg=a.C_BG, cursor="hand2",
+            self.label(line, q["current"], 9, fg=C_MUTED, width=14).pack(side="left")
+            self.label(line, "→", 9, fg=C_MUTED).pack(side="left", padx=4)
+            sug = tk.Label(line, text=q["suggested"], font=self.F(9, True), fg=C_PRIMARY, bg=C_BG, cursor="hand2",
                            width=14, anchor="w")
             sug.pack(side="left")
             sug.bind("<Button-1>", lambda e, q=q, sug=sug: self.rv_edit(q, sug))
-            self.label(line, q["reason"], 9, fg=a.C_MUTED, wraplength=320).pack(side="left", fill="x", expand=True)
+            self.label(line, q["reason"], 9, fg=C_MUTED, wraplength=320).pack(side="left", fill="x", expand=True)
         self.rv_count_update()
         self.c_review.pack(fill="both", expand=True, pady=(0, 8), before=self.c_log)
         self.c_set(f"수정 제안 {len(props)}건을 확인해 주세요.")
@@ -654,31 +723,30 @@ class TkUI:
 
     # ---------------------------------------------------------------- 서비스 제공계획 입력 (s-care)
     def build_scare(self):
-        a = self.app
         p = self.page("scare")
         acts, _ = self.head(p, "서비스 제공계획 입력", "s-care에 서비스 제공계획을 입력하고 저장해요. 로그인은 크롬 창에서 직접 해 주세요.")
         self.s_start_btn = self.button(acts, "입력 시작", self.s_start, primary=True)
         self.s_start_btn.pack(side="right")
         self.button(acts, "s-care 열기", self.s_open).pack(side="right", padx=(0, 6))
-        row = tk.Frame(p, bg=a.C_BG)
+        row = tk.Frame(p, bg=C_BG)
         row.pack(fill="x", pady=(0, 8))
-        f1 = tk.Frame(row, bg=a.C_BG)
+        f1 = tk.Frame(row, bg=C_BG)
         f1.pack(side="left", padx=(0, 18))
-        self.label(f1, "계획자", 9, fg=a.C_MUTED).pack(anchor="w")
+        self.label(f1, "계획자", 9, fg=C_MUTED).pack(anchor="w")
         self.s_planner = tk.Entry(f1, font=self.F(10), width=14, relief="solid", bd=1)
         self.s_planner.pack(ipady=3)
         self.s_other = self.seg(row, "타서비스 연계", (("0", "필요없음"), ("1", "의뢰필요")))
         self.s_group = self.seg(row, "기본 군", (("일반", "일반군"), ("중점", "중점군")))
         self.label(p, "어르신 이름을 한 줄에 한 분씩 적어 주세요. 군이 다르면 이름 뒤에 '중점' 또는 '일반'을 붙여요. (예: 김영희 중점)",
-                   9, fg=a.C_MUTED).pack(fill="x")
+                   9, fg=C_MUTED).pack(fill="x")
         self.s_names = tk.Text(p, height=5, font=self.F(10), relief="solid", bd=1, padx=8, pady=6)
         self.s_names.pack(fill="x", pady=(2, 6))
-        self.s_msg = self.label(p, "계획자·타서비스 연계·기본 군은 이 PC에 기억돼요.", 9, fg=a.C_MUTED)
+        self.s_msg = self.label(p, "계획자·타서비스 연계·기본 군은 이 PC에 기억돼요.", 9, fg=C_MUTED)
         self.s_msg.pack(fill="x")
-        hdr = tk.Frame(p, bg=a.C_CARD)
+        hdr = tk.Frame(p, bg=C_CARD)
         hdr.pack(fill="x", pady=(8, 0))
         for text, w in (("어르신", 10), ("군", 6), ("상태", 10), ("메모", 40)):
-            self.label(hdr, text, 9, fg=a.C_MUTED, bg=a.C_CARD, width=w, padx=8, pady=4).pack(side="left")
+            self.label(hdr, text, 9, fg=C_MUTED, bg=C_CARD, width=w, padx=8, pady=4).pack(side="left")
         wrap, self.s_list = self.scroll_list(p)
         wrap.pack(fill="both", expand=True)
         self.empty(self.s_list, "입력 시작을 누르면 여기에 결과가 나와요.")
@@ -687,11 +755,10 @@ class TkUI:
         self.s_rows = []
 
     def seg(self, parent, title, items):
-        a = self.app
-        f = tk.Frame(parent, bg=a.C_BG)
+        f = tk.Frame(parent, bg=C_BG)
         f.pack(side="left", padx=(0, 18))
-        self.label(f, title, 9, fg=a.C_MUTED).pack(anchor="w")
-        box = tk.Frame(f, bg=a.C_LINE, padx=1, pady=1)
+        self.label(f, title, 9, fg=C_MUTED).pack(anchor="w")
+        box = tk.Frame(f, bg=C_LINE, padx=1, pady=1)
         box.pack(anchor="w")
         var = tk.StringVar(value=items[0][0])
         labs = {}
@@ -699,7 +766,7 @@ class TkUI:
         def paint():
             for v, lab in labs.items():
                 on = var.get() == v
-                lab.configure(bg="#DBEAFE" if on else "#FFFFFF", fg="#1D4ED8" if on else a.C_MUTED,
+                lab.configure(bg="#DBEAFE" if on else "#FFFFFF", fg="#1D4ED8" if on else C_MUTED,
                               font=self.F(9, on))
         for v, text in items:
             lab = tk.Label(box, text=text, padx=12, pady=5, cursor="hand2")
@@ -711,7 +778,7 @@ class TkUI:
         return var
 
     def s_set(self, text, err=False):
-        self.s_msg.configure(text=text, fg=self.app.C_DANGER if err else self.app.C_MUTED)
+        self.s_msg.configure(text=text, fg=C_DANGER if err else C_MUTED)
 
     def s_open(self):
         e = self.api.scare_open()
@@ -731,46 +798,44 @@ class TkUI:
         self.s_set("입력하는 중이에요...")
 
     def s_render(self):
-        a = self.app
         self.clear(self.s_list)
         for r in self.s_rows:
-            line = tk.Frame(self.s_list, bg=a.C_BG, padx=8, pady=6)
+            line = tk.Frame(self.s_list, bg=C_BG, padx=8, pady=6)
             line.pack(fill="x")
-            tk.Frame(self.s_list, bg=a.C_LINE, height=1).pack(fill="x")
+            tk.Frame(self.s_list, bg=C_LINE, height=1).pack(fill="x")
             self.label(line, r["name"], 10, True, width=10).pack(side="left")
             self.label(line, r["group"], 9, width=6).pack(side="left")
             self.badge(line, r["status"]).pack(side="left", padx=(0, 10))
-            self.label(line, r["note"] or "", 9, fg=a.C_MUTED, wraplength=460).pack(side="left", fill="x", expand=True)
+            self.label(line, r["note"] or "", 9, fg=C_MUTED, wraplength=460).pack(side="left", fill="x", expand=True)
 
     # ---------------------------------------------------------------- 설정
     def build_settings(self):
-        a = self.app
         p = self.page("settings")
         self.head(p, "설정", "이 PC의 윈도우 계정에만 암호화해서 저장돼요.")
-        form = tk.Frame(p, bg=a.C_BG)
+        form = tk.Frame(p, bg=C_BG)
         form.pack(anchor="w", fill="x")
         self.st = {}
         for key, text, show in (("id", "goodeos 아이디", ""), ("pw", "goodeos 비밀번호", "●"),
                                 ("jev", "Jev API 키 (카톡 요청 처리용)", "●")):
-            self.label(form, text, 9, fg=a.C_MUTED).pack(anchor="w")
+            self.label(form, text, 9, fg=C_MUTED).pack(anchor="w")
             e = tk.Entry(form, font=self.F(11), width=38, show=show, relief="solid", bd=1)
             e.pack(anchor="w", pady=(2, 12), ipady=3)
             self.st[key] = e
-        self.st_hint = self.label(form, "", 8, fg=a.C_MUTED)
+        self.st_hint = self.label(form, "", 8, fg=C_MUTED)
         self.st_hint.pack(anchor="w")
         self.st_hide = tk.BooleanVar()
         tk.Checkbutton(form, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=self.st_hide, font=self.F(9),
-                       bg=a.C_BG, activebackground=a.C_BG, selectcolor=a.C_BG, anchor="w").pack(anchor="w", pady=(4, 0))
-        btns = tk.Frame(p, bg=a.C_BG)
+                       bg=C_BG, activebackground=C_BG, selectcolor=C_BG, anchor="w").pack(anchor="w", pady=(4, 0))
+        btns = tk.Frame(p, bg=C_BG)
         btns.pack(anchor="w", pady=(14, 0))
         self.button(btns, "저장", self.st_save, primary=True).pack(side="left")
         self.button(btns, "크롬 창 열기", self.st_chrome).pack(side="left", padx=(8, 0))
         self.button(btns, "로그인 정보 지우기", self.st_delete).pack(side="left", padx=(8, 0))
-        self.st_msg = self.label(p, "", 9, fg=a.C_MUTED)
+        self.st_msg = self.label(p, "", 9, fg=C_MUTED)
         self.st_msg.pack(anchor="w", pady=(10, 0))
 
     def st_set(self, text, err=False):
-        self.st_msg.configure(text=text, fg=self.app.C_DANGER if err else self.app.C_MUTED)
+        self.st_msg.configure(text=text, fg=C_DANGER if err else C_MUTED)
 
     def st_save(self):
         pw = self.st["pw"].get()

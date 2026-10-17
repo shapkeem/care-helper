@@ -1,92 +1,9 @@
 # -*- coding: utf-8 -*-
-"""웹 화면 (pywebview + WebView2). 화면은 ui/index.html, 기능은 맞춤돌봄도우미.py 의 함수를 그대로 쓴다.
-
-WebView2 가 없으면 마이크로소프트 공식 설치 파일을 받아, 마이크로소프트 서명을 확인한 뒤에만 설치한다.
-설치할 수 없으면 start() 가 False 를 돌려주고, 기본 화면(tkinter)으로 켠다.
-"""
-import json
+"""화면(tkui.py)이 부르는 기능 모음. 오래 걸리는 일은 스레드로 돌리고, 결과는 emit(이벤트, 데이터)로 화면에 알린다.
+기능은 맞춤돌봄도우미.py·kakao_job.py·plan_converter.py·scare_plan.py 의 함수를 그대로 쓴다."""
 import os
-import subprocess
-import sys
-import tempfile
 import threading
-import urllib.request
 from datetime import date
-
-WEBVIEW2_BOOTSTRAPPER = "https://go.microsoft.com/fwlink/p/?LinkId=2124703"  # 마이크로소프트 공식 Evergreen 설치 파일
-WEBVIEW2_GUID = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
-
-
-# ---------------------------------------------------------------- WebView2 확인·설치
-def webview2_installed():
-    import winreg
-    keys = [
-        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}"),
-        (winreg.HKEY_LOCAL_MACHINE, rf"SOFTWARE\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}"),
-        (winreg.HKEY_CURRENT_USER, rf"Software\Microsoft\EdgeUpdate\Clients\{WEBVIEW2_GUID}"),
-    ]
-    for root, path in keys:
-        try:
-            with winreg.OpenKey(root, path) as k:
-                pv, _ = winreg.QueryValueEx(k, "pv")
-                if pv and pv != "0.0.0.0":
-                    return True
-        except OSError:
-            pass
-    return False
-
-
-def _signed_by_microsoft(path):
-    """윈도우가 확인한 디지털 서명이 유효하고, 서명한 곳이 Microsoft Corporation 인지."""
-    ps = ("$s = Get-AuthenticodeSignature -LiteralPath $env:CH_FILE; "
-          "if ($s.Status -eq 'Valid' -and $s.SignerCertificate.Subject -match 'O=Microsoft Corporation') "
-          "{ 'OK' } else { 'NO' }")
-    env = dict(os.environ, CH_FILE=path)
-    r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", ps], env=env,
-                       capture_output=True, text=True, timeout=60,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    return r.stdout.strip() == "OK"
-
-
-def install_webview2(notify):
-    """→ 설치됐으면 True. notify(글) 로 진행 상황을 알린다."""
-    notify("화면 구성 요소(Microsoft WebView2)가 없어서 설치하고 있어요. 1~2분 걸릴 수 있어요.")
-    path = os.path.join(tempfile.gettempdir(), "MicrosoftEdgeWebview2Setup.exe")
-    try:
-        req = urllib.request.Request(WEBVIEW2_BOOTSTRAPPER, headers={"User-Agent": "care-helper"})
-        with urllib.request.urlopen(req, timeout=60) as resp, open(path, "wb") as f:
-            f.write(resp.read())
-        if not _signed_by_microsoft(path):
-            notify("받은 설치 파일의 마이크로소프트 서명을 확인하지 못해서 설치하지 않았어요.")
-            return False
-        subprocess.run([path, "/silent", "/install"], timeout=600,
-                       creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0))
-    except Exception as e:
-        notify(f"WebView2 를 설치하지 못했어요: {e}")
-        return False
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-    return webview2_installed()
-
-
-def ensure_webview2():
-    if webview2_installed():
-        return True
-    import tkinter as tk
-    from tkinter import messagebox
-    root = tk.Tk()
-    root.withdraw()
-    msgs = []
-    ok = install_webview2(msgs.append)
-    if not ok:
-        messagebox.showwarning("맞춤돌봄도우미", (msgs[-1] if msgs else "WebView2 를 설치하지 못했어요.") +
-                               "\n\n기본 화면으로 켤게요. 기능은 똑같이 쓸 수 있어요.\n"
-                               "직접 설치: https://developer.microsoft.com/microsoft-edge/webview2/")
-    root.destroy()
-    return ok
 
 
 # ---------------------------------------------------------------- 클립보드
@@ -117,11 +34,9 @@ def set_clipboard(text):
 
 # ---------------------------------------------------------------- 화면 ↔ 파이썬
 class Api:
-    """index.html 의 window.pywebview.api.* 로 불린다. 밑줄로 시작하는 것은 화면에 드러나지 않는다."""
-
-    def __init__(self, app):
+    def __init__(self, app, emit):
         self._app = app
-        self._win = None
+        self._emit = emit  # emit(이벤트 이름, 데이터): 작업 스레드에서 불러도 된다
         # 기능마다 따로: 카톡 처리 중에도 일일실적 점검 등 다른 기능은 동시에 할 수 있다
         self._b = {k: {"v": False} for k in ("daily", "kakao", "conv", "scare", "chrome", "update")}
         self._check = None
@@ -138,11 +53,6 @@ class Api:
 
     def _any_busy(self):
         return any(f["v"] for f in self._b.values())
-
-    def _emit(self, ev, data=None):
-        if self._win is not None:
-            self._win.evaluate_js(f"window.App && App.on({json.dumps(ev)}, "
-                                  f"{json.dumps(data, ensure_ascii=False, default=str)})")
 
     def _on_question(self, question, options):
         if question is None:
@@ -559,24 +469,3 @@ class Api:
         a.cancel_chrome_close()
         a.kill_hidden_chrome_now()  # 기다리지 않음 (창이 바로 닫히게)
 
-
-def start(app):
-    """웹 화면으로 켠다. 쓸 수 없으면 False (기본 화면으로)."""
-    try:
-        import webview
-    except Exception:
-        return False
-    if not ensure_webview2():
-        return False
-    base = getattr(sys, "_MEIPASS", os.path.dirname(os.path.abspath(__file__)))
-    html = os.path.join(base, "ui", "index.html")
-    if not os.path.exists(html):
-        return False
-    app.cleanup_old_update_files()
-    api = Api(app)
-    win = webview.create_window(app.APP_NAME, url=html, js_api=api, width=1040, height=820,
-                                min_size=(900, 640), background_color="#FFFFFF", text_select=True)
-    api._win = win
-    win.events.closing += lambda: api._close_chrome()
-    webview.start(gui="edgechromium", private_mode=True)
-    return True

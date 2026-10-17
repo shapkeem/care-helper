@@ -6,7 +6,7 @@ Jev 가 하는 일: 대화명 오타 → 지원사, 이름 오타 → 대상자,
 """
 import re
 from dataclasses import dataclass, field
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 
 import jev
 
