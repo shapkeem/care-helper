@@ -159,10 +159,10 @@ class TkUI:
         w, h = c.font.measure(text) + 18, 20
         c.configure(width=w)
         c.delete("all")
-        if text:
-            r = h / 2
-            pts = [r, 0, w - r, 0, w, 0, w, r, w, h - r, w, h, w - r, h, r, h, 0, h, 0, h - r, 0, r, 0, 0]
-            c.create_polygon(pts, smooth=True, fill=bg, outline=bg)
+        if text:  # 양 끝을 반원으로 그린 알약 모양
+            c.create_oval(0, 0, h, h - 1, fill=bg, outline=bg)
+            c.create_oval(w - h, 0, w - 1, h - 1, fill=bg, outline=bg)
+            c.create_rectangle(h / 2, 0, w - h / 2, h - 1, fill=bg, outline=bg)
             c.create_text(w / 2, h / 2, text=text, fill=fg, font=c.font)
 
     def head(self, page, title, sub):
