@@ -88,6 +88,58 @@ def _round_button_class():
     return RoundButton
 
 
+class ThinScrollbar(tk.Canvas):
+    """얇고 둥근 스크롤 막대 (기본 스크롤바는 화살표가 달린 굵은 회색이라 직접 그린다). 내용이 다 보이면 숨긴다."""
+    W = 10
+
+    def __init__(self, master, command, bg):
+        super().__init__(master, width=self.W, bg=bg, highlightthickness=0, bd=0)
+        self.command = command
+        self.first, self.last = 0.0, 1.0
+        self.hover = self.drag = None
+        self.bind("<Configure>", lambda e: self.draw())
+        self.bind("<Enter>", lambda e: self._hover(True))
+        self.bind("<Leave>", lambda e: self._hover(False))
+        self.bind("<ButtonPress-1>", self._press)
+        self.bind("<B1-Motion>", self._move)
+        self.bind("<ButtonRelease-1>", lambda e: setattr(self, "drag", None))
+
+    def set(self, first, last):
+        self.first, self.last = float(first), float(last)
+        self.draw()
+
+    def _hover(self, on):
+        self.hover = on
+        self.draw()
+
+    def draw(self):
+        self.delete("all")
+        h = self.winfo_height()
+        if self.last - self.first >= 0.999 or h < 20:
+            return  # 스크롤할 게 없으면 안 그림
+        y1 = max(2, self.first * h)
+        y2 = min(h - 2, max(y1 + 24, self.last * h))
+        x1, x2 = 2, self.W - 2
+        color = "#94A3B8" if self.hover or self.drag is not None else "#CBD5E1"
+        r = (x2 - x1) / 2
+        self.create_oval(x1, y1, x2, y1 + 2 * r, fill=color, outline=color)
+        self.create_oval(x1, y2 - 2 * r, x2, y2, fill=color, outline=color)
+        self.create_rectangle(x1, y1 + r, x2, y2 - r, fill=color, outline=color)
+
+    def _press(self, e):
+        h = max(1, self.winfo_height())
+        if self.first * h <= e.y <= self.last * h:
+            self.drag = (e.y, self.first)  # 막대를 잡음
+        else:  # 막대 바깥을 누르면 그쪽으로 한 쪽씩
+            self.command("scroll", -1 if e.y < self.first * h else 1, "pages")
+
+    def _move(self, e):
+        if self.drag is None:
+            return
+        y0, f0 = self.drag
+        self.command("moveto", f0 + (e.y - y0) / max(1, self.winfo_height()))
+
+
 class TkUI:
     def __init__(self, app):
         import api
@@ -182,9 +234,9 @@ class TkUI:
         """테두리 있는 스크롤 목록. → 안쪽 프레임"""
         wrap = tk.Frame(parent, bg=C_BG, highlightbackground=C_LINE, highlightthickness=1)
         canvas = tk.Canvas(wrap, bg=C_BG, highlightthickness=0, height=height or 200)
-        sb = ttk.Scrollbar(wrap, orient="vertical", command=canvas.yview)
+        sb = ThinScrollbar(wrap, canvas.yview, C_BG)
         canvas.configure(yscrollcommand=sb.set)
-        sb.pack(side="right", fill="y")
+        sb.pack(side="right", fill="y", padx=(0, 2), pady=2)
         canvas.pack(side="left", fill="both", expand=True)
         inner = tk.Frame(canvas, bg=C_BG)
         wid = canvas.create_window((0, 0), window=inner, anchor="nw")
