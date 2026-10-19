@@ -38,6 +38,9 @@ def set_clipboard(text):
         u32.CloseClipboard()
 
 
+COPY_FAIL = "복사하지 못했어요. 다시 눌러 주세요."
+
+
 # ---------------------------------------------------------------- 화면 ↔ 파이썬
 class Api:
     def __init__(self, app, emit):
@@ -175,13 +178,15 @@ class Api:
 
     def copy_person(self, idx):
         r, kind = self._row(idx)
-        set_clipboard("\n".join(self._app.person_block(r, kind)))
+        if not set_clipboard("\n".join(self._app.person_block(r, kind))):
+            return COPY_FAIL
         return f"{r['성명']} 님 내용을 복사했어요."
 
     def copy_all(self):
         if not self._check:
             return "먼저 점검을 해 주세요."
-        set_clipboard(self._check["report"].strip())
+        if not set_clipboard(self._check["report"].strip()):
+            return COPY_FAIL
         return "전체 결과를 복사했어요."
 
     # ---- 카톡 요청 처리
