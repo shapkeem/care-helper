@@ -1,10 +1,20 @@
+# Tk 창을 한 프로세스에서 여러 번 만들면 가끔 TclError(tk wasn't installed properly)가 난다.
+# 그래서 시험마다 새 파이썬 프로세스에서 Tk 를 한 번만 만든다.
 import importlib.util
 import os
+import subprocess
 import sys
-import tkinter as tk
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, ROOT)
+HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def in_child(name):
+    env = dict(os.environ, PYTHONIOENCODING="utf-8")
+    code = f"import sys; sys.path[:0] = [{ROOT!r}, {HERE!r}]; import test_tkui_smoke as t; t.{name}()"
+    p = subprocess.run([sys.executable, "-X", "utf8", "-c", code], cwd=ROOT, env=env,
+                       capture_output=True, text=True, encoding="utf-8", timeout=120)
+    assert p.returncode == 0, p.stdout + p.stderr
 
 
 def load_app():
@@ -14,7 +24,8 @@ def load_app():
     return m
 
 
-def test_build_and_widgets():
+def _build_and_widgets():
+    import tkinter as tk
     import tkui
     ui = tkui.TkUI(load_app())
     try:
@@ -32,27 +43,21 @@ def test_build_and_widgets():
         ui.root.destroy()
 
 
-def _start_ui_with_leftovers(tkui, monkeypatch, answer):
+def _start_ui_with_leftovers(answer):
+    import tkui
     ui = tkui.TkUI(load_app())
     ui.build()
     ui.root.update()
-    cleared = []
-    asked = []
+    cleared, asked = [], []
     ui.api.conv_info = lambda: {"leftovers": 2}
     ui.api.conv_clear_leftovers = lambda: (cleared.append(True), "휴지통으로 보냈어요")[1]
     ui.api.conv_start = lambda: "중단"
-
-    def fake_askyesno(title, message, **kw):
-        asked.append(message)
-        return answer
-
-    monkeypatch.setattr(tkui.messagebox, "askyesno", fake_askyesno)
+    tkui.messagebox.askyesno = lambda title, message, **kw: (asked.append(message), answer)[1]
     return ui, cleared, asked
 
 
-def test_start_asks_about_leftovers_and_clears_on_yes(monkeypatch):
-    import tkui
-    ui, cleared, asked = _start_ui_with_leftovers(tkui, monkeypatch, True)
+def _leftovers_yes():
+    ui, cleared, asked = _start_ui_with_leftovers(True)
     try:
         ui.c_do_start()
         assert len(cleared) == 1
@@ -61,12 +66,23 @@ def test_start_asks_about_leftovers_and_clears_on_yes(monkeypatch):
         ui.root.destroy()
 
 
-def test_start_keeps_leftovers_on_no(monkeypatch):
-    import tkui
-    ui, cleared, asked = _start_ui_with_leftovers(tkui, monkeypatch, False)
+def _leftovers_no():
+    ui, cleared, asked = _start_ui_with_leftovers(False)
     try:
         ui.c_do_start()
         assert cleared == []
         assert len(asked) == 1
     finally:
         ui.root.destroy()
+
+
+def test_build_and_widgets():
+    in_child("_build_and_widgets")
+
+
+def test_start_asks_about_leftovers_and_clears_on_yes():
+    in_child("_leftovers_yes")
+
+
+def test_start_keeps_leftovers_on_no():
+    in_child("_leftovers_no")
