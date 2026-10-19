@@ -123,3 +123,25 @@ def test_visit_without_end_asks(monkeypatch):
             for x in ip2.interpret(s, d, b)]
     assert asked and "30분" in asked[0]
     assert (it.frm, it.to) == ("1400", "1430")
+
+
+def test_delete_needs_no_question(ip):
+    [it] = run(ip, "이미화\n김말순 어르신 어제 2시 방문 삭제해주세요")
+    assert (it.action, it.frm, it.to) == ("삭제", "1400", "1401")
+
+
+def test_blocked_person_not_asked(monkeypatch):
+    def no_jev(*a, **k):
+        raise AssertionError("Jev 없이 풀려야 해요")
+    monkeypatch.setattr(kakao.jev, "ask", no_jev)
+    monkeypatch.setattr(kakao.jev, "choice", no_jev)
+
+    def no_ask(q, opts):
+        raise AssertionError("묻지 않아야 해요: " + q)
+    roster2 = ROSTER + [{"성명": "최종결", "생활지원사": "이미화", "이용상태": "종결", "생년월일": "1930.01.01"}]
+    ip2 = kakao.Interpreter(roster2, no_ask, MON)
+    out = []
+    for s, d, b in kakao.split_messages("이미화\n최종결 어르신 어제 2시 방문 실적요", MON, ip2.ics):
+        out += ip2.interpret(s, d, b)
+    [it] = out
+    assert it.status == "사람 처리"

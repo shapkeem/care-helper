@@ -429,7 +429,10 @@ class Interpreter:
         for it in items:  # 시작 시간만 있을 때: 전화는 1분, 나머지는 몇 분 했는지 묻는다
             if not it.frm or it.to or it.action == "기타":
                 continue
-            if it.kind == "전화":
+            st0 = next((r.get("이용상태", "") for r in rows if r["성명"] == it.person), "")
+            if it.kind.startswith("!") or st0 in STATUS_BLOCK:  # 아래에서 어차피 사람 처리
+                continue
+            if it.kind == "전화" or it.action == "삭제":  # 삭제는 일정 시작과 겹치는 시간이면 돼요
                 it.to = add_minutes(it.frm, 1)
                 continue
             pick = self.ask(f"{it.label()}\n몇 분 동안 했어요?\n\n{body[:200]}",
