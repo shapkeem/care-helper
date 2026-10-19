@@ -15,7 +15,7 @@ BADGE = {  # 상태 글자: (배경, 글자색)
 }
 STATUS_BADGE = {"완료": "ok", "실적 넣음": "ok", "처리 중": "run", "대기": "idle", "사람 처리": "warn",
                 "건너뜀": "idle", "멈춤": "idle", "확인 필요": "err", "오류": "err", "요청 아님": "idle"}
-GOODEOS_TEXT = {"ok": "goodeos 로그인됨", "ok_hidden": "goodeos 로그인됨 · 백그라운드", "auto": "goodeos 자동 로그인",
+GOODEOS_TEXT = {"ok": "goodeos 로그인됨", "ok_hidden": "goodeos 로그인됨", "auto": "goodeos 자동 로그인",
                 "login": "goodeos 로그인 필요", "off": "크롬 꺼짐", "backup": "goodeos 백업 시간 (0~4시)"}
 
 
@@ -32,6 +32,12 @@ C_SIDE = "#F8FAFC"
 C_SIDE_HOVER = "#EEF2F6"
 C_SIDE_ON = "#E2E8F0"
 FONT = "맑은 고딕"
+
+
+def _round_points(x1, y1, x2, y2, r):
+    """smooth=True 다각형으로 그리는 둥근 사각형 꼭짓점."""
+    return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
+            x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
 
 
 def _round_button_class():
@@ -69,9 +75,7 @@ def _round_button_class():
                 fill = hover
             w, h, r = int(self["width"]), self._h, self._h / 2
             self.delete("all")
-            x1, y1, x2, y2 = 1, 1, w - 1, h - 1
-            pts = [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
-                   x2 - r, y2, x1 + r, y2, x1, y2, x1, y2 - r, x1, y1 + r, x1, y1]
+            pts = _round_points(1, 1, w - 1, h - 1, r)
             self.create_polygon(pts, smooth=True, fill=fill, outline=line or fill)
             self.create_text(w / 2, h / 2, text=self._text, fill=fg, font=self._font)
 
@@ -138,6 +142,48 @@ class ThinScrollbar(tk.Canvas):
             return
         y0, f0 = self.drag
         self.command("moveto", f0 + (e.y - y0) / max(1, self.winfo_height()))
+
+
+class RoundField(tk.Canvas):
+    """둥근 테두리 입력칸 (기본 Entry 는 검은 사각 테두리라 직접 그린다). 글자는 안쪽 .w(Entry/Text)로 다룬다."""
+
+    def __init__(self, master, lines=1, width=None, show="", size=10, bg=C_BG):
+        self._lines = lines
+        h = 36 if lines == 1 else lines * 22 + 16
+        super().__init__(master, height=h, bg=bg, highlightthickness=0, bd=0)
+        if width:
+            self.configure(width=width)
+        font = tkfont.Font(family=FONT, size=size)
+        if lines == 1:
+            self.w = tk.Entry(self, font=font, relief="flat", bd=0, bg="#FFFFFF", show=show, highlightthickness=0)
+        else:
+            self.w = tk.Text(self, font=font, relief="flat", bd=0, bg="#FFFFFF", wrap="word",
+                             highlightthickness=0, height=lines)
+        self._win = self.create_window(12, 8, window=self.w, anchor="nw")
+        self._focus = False
+        self.w.bind("<FocusIn>", lambda e: self._set(True), add="+")
+        self.w.bind("<FocusOut>", lambda e: self._set(False), add="+")
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Button-1>", lambda e: self.w.focus_set())
+
+    def _set(self, v):
+        self._focus = v
+        self._draw()
+
+    def _draw(self):
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 30:
+            return
+        self.delete("box")
+        line = C_PRIMARY if self._focus else "#CBD5E1"
+        self.create_polygon(_round_points(1, 1, w - 2, h - 2, 10), smooth=True, fill="#FFFFFF", outline=line,
+                            width=2 if self._focus else 1, tags="box")
+        self.tag_lower("box")
+        if self._lines == 1:
+            self.coords(self._win, 12, h / 2)
+            self.itemconfigure(self._win, anchor="w", width=w - 24)
+        else:
+            self.itemconfigure(self._win, width=w - 24, height=h - 16)
 
 
 class TkUI:
@@ -216,6 +262,14 @@ class TkUI:
             c.create_oval(w - h, 0, w - 1, h - 1, fill=bg, outline=bg)
             c.create_rectangle(h / 2, 0, w - h / 2, h - 1, fill=bg, outline=bg)
             c.create_text(w / 2, h / 2, text=text, fill=fg, font=c.font)
+
+    def status_cell(self, parent, text, width=96):
+        """표의 상태 칸: 폭을 고정하고 알약을 가운데에 둔다."""
+        cell = tk.Frame(parent, bg=parent.cget("bg"), width=width, height=24)
+        cell.pack_propagate(False)
+        b = self.badge(cell, text)
+        b.place(relx=0.5, rely=0.5, anchor="center")
+        return cell, b
 
     def head(self, page, title, sub):
         h = tk.Frame(page, bg=C_BG)
@@ -324,10 +378,9 @@ class TkUI:
         bottom.pack(side="bottom", fill="x", pady=(0, 14))
         tk.Frame(bottom, bg=C_LINE, height=1).pack(fill="x", pady=(0, 8))
         self.nav_item(bottom, "settings", "설정")
-        self.pill = tk.Label(bottom, font=self.F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=170,
-                             text="●  상태 확인 중...", bg=C_CARD, fg=C_MUTED)
+        self.pill = self.badge(bottom, "●  상태 확인 중...", "idle")
         self.pill.pack(anchor="w", padx=18, pady=(8, 2))
-        self.pill2 = tk.Label(bottom, font=self.F(8), padx=8, pady=3, anchor="w", justify="left", wraplength=170)
+        self.pill2 = self.badge(bottom, "", "idle")
         self.upd_btn = self.RB(bottom, "업데이트", self.do_update, kind="update", height=30, padx=14, size=9,
                                bg=C_SIDE)
         self.ver = self.label(bottom, f"v{a.APP_VERSION}", 8, fg=C_MUTED, bg=C_SIDE)
@@ -496,13 +549,13 @@ class TkUI:
     # ---------------------------------------------------------------- 카톡 요청 처리
     def build_kakao(self):
         p = self.page("kakao")
-        acts, _ = self.head(p, "카톡 요청 처리", "생활지원사 카톡을 붙여넣으면 알아서 처리해요. 애매한 건 물어볼게요.")
+        acts, _ = self.head(p, "카톡 요청 처리", "카톡을 아무렇게나 붙여 넣어도 돼요. 애매한 건 물어볼게요.")
         self.k_start_btn = self.button(acts, "처리 시작", self.k_start, primary=True)
         self.k_start_btn.pack(side="right")
         self.button(acts, "멈춤", self.api.kakao_stop).pack(side="right", padx=(0, 6))
-        self.label(p, "예) [이미화생지사1동] [오후 2:01] 장귀현 어르신 방문 실행 부탁드립니다", 9, fg=C_MUTED).pack(fill="x")
-        self.k_text = tk.Text(p, height=6, font=self.F(10), relief="solid", bd=1, wrap="word", padx=8, pady=6)
-        self.k_text.pack(fill="x", pady=(2, 6))
+        box = RoundField(p, lines=6)
+        box.pack(fill="x", pady=(2, 6))
+        self.k_text = box.w
         self.k_status = self.label(p, "", 9, fg=C_MUTED)
         self.k_status.pack(fill="x")
         self.k_q = tk.Frame(p, bg="#EFF6FF", padx=12, pady=10, highlightbackground="#BFDBFE", highlightthickness=1)
@@ -512,16 +565,22 @@ class TkUI:
         self.k_qopts.pack(fill="x", pady=6)
         row = tk.Frame(self.k_q, bg="#EFF6FF")
         row.pack(fill="x")
-        self.k_qin = tk.Entry(row, font=self.F(10), relief="solid", bd=1)
-        self.k_qin.pack(side="left", fill="x", expand=True, ipady=3)
+        qbox = RoundField(row, bg="#EFF6FF")
+        qbox.pack(side="left", fill="x", expand=True)
+        self.k_qin = qbox.w
         self.k_qin.bind("<Return>", lambda e: self.k_send())
         self.button(row, "건너뛰기", lambda: self.k_answer(None), small=True).pack(side="right", padx=(6, 0))
         self.button(row, "답하기", self.k_send, primary=True, small=True).pack(side="right", padx=(6, 0))
         self.k_table_wrap, self.k_table = self.scroll_list(p)
         hdr = self.k_hdr = tk.Frame(p, bg=C_CARD)
         hdr.pack(fill="x", pady=(8, 0))
-        for text, w in (("요청", 40), ("상태", 10), ("메모", 30)):
-            self.label(hdr, text, 9, fg=C_MUTED, bg=C_CARD, width=w, padx=8, pady=4).pack(side="left")
+        hdr.configure(padx=8)
+        self.label(hdr, "요청", 9, fg=C_MUTED, bg=C_CARD, width=46, pady=4).pack(side="left")
+        hc = tk.Frame(hdr, bg=C_CARD, width=96, height=24)
+        hc.pack_propagate(False)
+        hc.pack(side="left", padx=8)
+        tk.Label(hc, text="상태", font=self.F(9), fg=C_MUTED, bg=C_CARD).place(relx=0.5, rely=0.5, anchor="center")
+        self.label(hdr, "메모", 9, fg=C_MUTED, bg=C_CARD).pack(side="left")
         self.k_table_wrap.pack(fill="both", expand=True)
         self.empty(self.k_table, "처리할 요청이 여기에 나와요.")
         self.k_rows = {}
@@ -547,8 +606,8 @@ class TkUI:
             tk.Frame(self.k_table, bg=C_LINE, height=1).pack(fill="x")
             lab = self.label(line, "", 9, width=46, wraplength=330)
             lab.pack(side="left")
-            st = self.badge(line, "")
-            st.pack(side="left", padx=8)
+            cell, st = self.status_cell(line, "")
+            cell.pack(side="left", padx=8)
             note = self.label(line, "", 9, fg=C_MUTED, wraplength=330)
             note.pack(side="left", fill="x", expand=True)
             row = self.k_rows[r["id"]] = (lab, st, note)
@@ -565,14 +624,20 @@ class TkUI:
             return
         self.k_qtext.configure(text=d["question"])
         self.clear(self.k_qopts)
-        for i, o in enumerate(d["options"][:12]):
+        f = tkfont.Font(family=FONT, size=9, weight="bold")
+        maxw, used, line = max(320, self.k_q.winfo_width() - 40), 0, None
+        for o in d["options"][:12]:
             text = o["key"] + (" · " + o["desc"] if o["desc"] and o["desc"] != o["key"] else "")
-            b = tk.Button(self.k_qopts, text=text, font=self.F(9), relief="solid", bd=1, bg="#FFFFFF",
-                          anchor="w", justify="left", wraplength=330, cursor="hand2",
-                          command=lambda k=o["key"]: self.k_answer(k))
-            b.grid(row=i // 2, column=i % 2, sticky="ew", padx=3, pady=2)
-        self.k_qopts.columnconfigure(0, weight=1)
-        self.k_qopts.columnconfigure(1, weight=1)
+            if len(text) > 40:
+                text = text[:39] + "…"
+            bw = f.measure(text) + 24 + 6
+            if line is None or used + bw > maxw:
+                line = tk.Frame(self.k_qopts, bg="#EFF6FF")
+                line.pack(fill="x", anchor="w")
+                used = 0
+            self.RB(line, text, lambda k=o["key"]: self.k_answer(k), height=30, padx=12, size=9,
+                    bg="#EFF6FF").pack(side="left", padx=(0, 6), pady=3)
+            used += bw
         self.k_q.pack(fill="x", pady=6, before=self.k_hdr)
         self.k_qin.delete(0, "end")
         self.k_qin.focus_set()
@@ -785,20 +850,28 @@ class TkUI:
         f1 = tk.Frame(row, bg=C_BG)
         f1.pack(side="left", padx=(0, 18))
         self.label(f1, "계획자", 9, fg=C_MUTED).pack(anchor="w")
-        self.s_planner = tk.Entry(f1, font=self.F(10), width=14, relief="solid", bd=1)
-        self.s_planner.pack(ipady=3)
+        pbox = RoundField(f1, width=150)
+        pbox.pack()
+        self.s_planner = pbox.w
         self.s_other = self.seg(row, "타서비스 연계", (("0", "필요없음"), ("1", "의뢰필요")))
         self.s_group = self.seg(row, "기본 군", (("일반", "일반군"), ("중점", "중점군")))
         self.label(p, "어르신 이름을 한 줄에 한 분씩 적어 주세요. 군이 다르면 이름 뒤에 '중점' 또는 '일반'을 붙여요. (예: 김영희 중점)",
                    9, fg=C_MUTED).pack(fill="x")
-        self.s_names = tk.Text(p, height=5, font=self.F(10), relief="solid", bd=1, padx=8, pady=6)
-        self.s_names.pack(fill="x", pady=(2, 6))
+        nbox = RoundField(p, lines=5)
+        nbox.pack(fill="x", pady=(2, 6))
+        self.s_names = nbox.w
         self.s_msg = self.label(p, "계획자·타서비스 연계·기본 군은 이 PC에 기억돼요.", 9, fg=C_MUTED)
         self.s_msg.pack(fill="x")
         hdr = tk.Frame(p, bg=C_CARD)
         hdr.pack(fill="x", pady=(8, 0))
-        for text, w in (("어르신", 10), ("군", 6), ("상태", 10), ("메모", 40)):
-            self.label(hdr, text, 9, fg=C_MUTED, bg=C_CARD, width=w, padx=8, pady=4).pack(side="left")
+        hdr.configure(padx=8)
+        self.label(hdr, "어르신", 9, fg=C_MUTED, bg=C_CARD, width=11, pady=4).pack(side="left")
+        self.label(hdr, "군", 9, fg=C_MUTED, bg=C_CARD, width=6).pack(side="left")
+        hc = tk.Frame(hdr, bg=C_CARD, width=96, height=24)
+        hc.pack_propagate(False)
+        hc.pack(side="left", padx=(0, 10))
+        tk.Label(hc, text="상태", font=self.F(9), fg=C_MUTED, bg=C_CARD).place(relx=0.5, rely=0.5, anchor="center")
+        self.label(hdr, "메모", 9, fg=C_MUTED, bg=C_CARD).pack(side="left")
         wrap, self.s_list = self.scroll_list(p)
         wrap.pack(fill="both", expand=True)
         self.empty(self.s_list, "입력 시작을 누르면 여기에 결과가 나와요.")
@@ -857,7 +930,7 @@ class TkUI:
             tk.Frame(self.s_list, bg=C_LINE, height=1).pack(fill="x")
             self.label(line, r["name"], 10, True, width=10).pack(side="left")
             self.label(line, r["group"], 9, width=6).pack(side="left")
-            self.badge(line, r["status"]).pack(side="left", padx=(0, 10))
+            self.status_cell(line, r["status"])[0].pack(side="left", padx=(0, 10))
             self.label(line, r["note"] or "", 9, fg=C_MUTED, wraplength=460).pack(side="left", fill="x", expand=True)
 
     # ---------------------------------------------------------------- 설정
@@ -870,9 +943,9 @@ class TkUI:
         for key, text, show in (("id", "goodeos 아이디", ""), ("pw", "goodeos 비밀번호", "●"),
                                 ("jev", "Jev API 키 (카톡 요청 처리용)", "●")):
             self.label(form, text, 9, fg=C_MUTED).pack(anchor="w")
-            e = tk.Entry(form, font=self.F(11), width=38, show=show, relief="solid", bd=1)
-            e.pack(anchor="w", pady=(2, 12), ipady=3)
-            self.st[key] = e
+            box = RoundField(form, width=380, show=show, size=11)
+            box.pack(anchor="w", pady=(2, 12))
+            self.st[key] = box.w
         self.st_hint = self.label(form, "", 8, fg=C_MUTED)
         self.st_hint.pack(anchor="w")
         self.st_hide = tk.BooleanVar()
@@ -915,12 +988,10 @@ class TkUI:
         kind = s["kind"]
         good = kind.startswith("ok") or kind == "auto"
         warn = kind in ("login", "backup")
-        bg, fg = BADGE["ok" if good else "warn" if warn else "idle"]
-        self.pill.configure(text="●  " + GOODEOS_TEXT.get(kind, s["text"]), bg=bg, fg=fg)
+        self.set_badge(self.pill, "●  " + GOODEOS_TEXT.get(kind, s["text"]), "ok" if good else "warn" if warn else "idle")
         if s.get("scare"):
             ok = s["scare"] == "ok"
-            bg, fg = BADGE["ok" if ok else "warn"]
-            self.pill2.configure(text="●  " + ("s-care 로그인됨" if ok else "s-care 로그인 필요"), bg=bg, fg=fg)
+            self.set_badge(self.pill2, "●  " + ("s-care 로그인됨" if ok else "s-care 로그인 필요"), "ok" if ok else "warn")
             self.pill2.pack(anchor="w", padx=18, pady=(2, 2), after=self.pill)
         else:
             self.pill2.pack_forget()
