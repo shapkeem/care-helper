@@ -201,6 +201,11 @@ def bad_time_spans(text):
     return _scan_times(text)[1]
 
 
+def ignored_times(text):
+    """범위와 같은 줄에 있어서 쓰지 않은 시각 → [(위치, 끝위치, HHMM, '')]"""
+    return _scan_times(text)[2]
+
+
 def find_times(text):
     """→ [(위치, 끝위치, HHMM, HHMM 또는 '')]. 끝을 모르면 ''."""
     return _scan_times(text)[0]
@@ -208,7 +213,7 @@ def find_times(text):
 
 def _scan_times(text):
     """→ (시간들, 못 읽은 범위들)"""
-    out, bad = [], []
+    out, bad, ignored = [], [], []  # ignored = 범위와 같은 줄이라 안 쓴 시각
 
     def free(s, e):
         return not any(s < oe and os_ < e for os_, oe, _, _ in out)
@@ -238,9 +243,13 @@ def _scan_times(text):
     lines = {text.count("\n", 0, s) for s, _ in blocked} | {text.count("\n", 0, s) for s, _, _, _ in out}
     for m in WT_ONE_RE.finditer(text):
         a = _word_hm(*m.group(1, 2, 3, 4))
-        if a and free(m.start(), m.end()) and text.count("\n", 0, m.start()) not in lines:
+        if not a or not free(m.start(), m.end()) or any(bs <= m.start() < be for bs, be in blocked):
+            continue
+        if text.count("\n", 0, m.start()) not in lines:
             out.append((m.start(), m.end(), a, ""))
-    return sorted(out), bad
+        else:
+            ignored.append((m.start(), m.end(), a, ""))
+    return sorted(out), bad, ignored
 
 
 def resolve_day(month, day, today):
@@ -484,6 +493,11 @@ class Interpreter:
             if it.action not in ("실적", "일정등록", "삭제"):  # 수정은 끝을 짐작하면 다른 일정을 지울 수 있어요
                 it.status, it.note = "사람 처리", "바꿀 시간을 범위로 적어 주세요 (예: 1000~1100)"
                 continue
+            line = self._line_of(body, getattr(it, "pos", 0), items)
+            if not find_action_words(line) and not REQUEST_RE.search(line):
+                # '3시에 주무셔서 전화 못 드렸어요' 같은 사정 설명 줄에 다른 줄의 요청을 붙이지 않는다
+                it.status, it.note = "사람 처리", "요청하는 말이 없는 줄이에요"
+                continue
             if it.kind == "전화" or it.action == "삭제":  # 삭제는 일정 시작과 겹치는 시간이면 돼요
                 it.to = add_minutes(it.frm, 1) or ""
             else:
@@ -502,6 +516,28 @@ class Interpreter:
             elif it.action in ("수정", "일정등록") and any(x.frm for x in items):
                 # 다른 줄에는 시간이 있는데 이 어르신은 이름만 나옴: 사유 설명일 수도 있어서 사람이 본다
                 it.status, it.note = "사람 처리", "이 어르신은 시간이 없어요 (다른 줄 설명이면 무시해 주세요)"
+        # 범위와 같은 줄이라 안 쓴 시각: 수정이면 그 줄의 항목을 사람 처리, 아니면 사람 처리 줄을 따로 보여 준다
+        for s, e, a, _ in ignored_times(body):
+            ln = body.count("\n", 0, s)
+            same = [it for it in items if it.frm and body.count("\n", 0, getattr(it, "pos", 0)) == ln]
+            mod = [it for it in same if it.action == "수정"]
+            for it in mod:
+                it.status, it.note = "사람 처리", "바꿀 시간을 범위로 적어 주세요 (예: 1000~1100)"
+            if mod:
+                continue
+            ls = body.rfind("\n", 0, s) + 1
+            le = body.find("\n", e)
+            le = len(body) if le < 0 else le
+            near = sorted([(min(abs(p - s), abs(p - e)), x) for p, x in names if ls <= p < le])
+            line_words = find_action_words(body[ls:le])
+            line_kinds = [k for p, k in kinds if e <= p < le] or [k for p, k in kinds if ls <= p < s]
+            dd = [d for p, d in dates if p <= s]
+            x = Item(ic=ic, person=near[0][1] if near else (same[0].person if same else ""),
+                     date=dd[-1] if dd else (same[0].date if same else msg_date), frm=a,
+                     kind=line_kinds[0] if line_kinds else "", action=line_words[0][1] if line_words else "",
+                     source=body, status="사람 처리", note="시간을 범위로 적어 주세요 (예: 1000~1100)")
+            x.pos = s
+            items.append(x)
         for it in items:
             st = next((r.get("이용상태", "") for r in rows if r["성명"] == it.person), "")
             if st in STATUS_BLOCK:
@@ -513,6 +549,16 @@ class Interpreter:
             elif it.action == "수정" and not it.frm:
                 it.status, it.note = "사람 처리", "시간이 없어서 어떻게 바꿀지 사람이 봐야 해요"
         return items
+
+    @staticmethod
+    def _line_of(body, pos, items):
+        """pos 가 있는 줄 (이름 속 낱말을 요청으로 읽지 않게 이름은 지움)"""
+        ls = body.rfind("\n", 0, pos) + 1
+        le = body.find("\n", pos)
+        line = body[ls:] if le < 0 else body[ls:le]
+        for n in {x for it in items for x in (it.person, it.old_person) if x}:
+            line = line.replace(n, " " * len(n))
+        return line
 
     def _client_desc(self, name, rows):
         r = next((x for x in rows if x["성명"] == name), {})

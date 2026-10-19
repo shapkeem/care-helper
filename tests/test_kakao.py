@@ -216,3 +216,33 @@ def test_end_past_midnight_goes_to_person(monkeypatch):
 def test_single_time_on_unrelated_line_ignored(ip):
     [it] = run(ip, "이미화\n오늘 9시 출근했어요\n장귀현 2시~3시 방문 실적")
     assert (it.person, it.frm, it.to) == ("장귀현", "1400", "1500")
+
+
+# ---------------------------------------------------------------- 2차 검토 수정
+def test_single_time_line_without_request_word(ip):
+    out = run(ip, "이미화\n장귀현 2시~3시 방문 입력\n김말순 어르신은 5시에 병원 가셔서 전화 못 받으셨어요")
+    assert [(it.person, it.frm, it.to, it.action, it.status) for it in out][0] == \
+        ("장귀현", "1400", "1500", "일정등록", "대기")
+    [k] = [it for it in out if it.person == "김말순"]
+    assert (k.status, k.note, k.to) == ("사람 처리", "요청하는 말이 없는 줄이에요", "")
+    for text, who in (("이미화\n김말순 2시 전화 실적 부탁\n장귀현 어르신은 3시에 주무셔서 전화 못 드렸어요", "장귀현"),
+                      ("이미화\n장귀현 2시~3시 방문 실적\n김말순 4시에 전화했는데 안 받으세요", "김말순")):
+        out = run(ip, text)
+        [k] = [it for it in out if it.person == who]
+        assert (k.status, k.note, k.to) == ("사람 처리", "요청하는 말이 없는 줄이에요", ""), text
+        assert all(it.status == "대기" for it in out if it.person != who), text
+
+
+def test_modify_range_with_ignored_single(ip):
+    out = run(ip, "이미화\n장귀현 어르신 1000-1100 방문을 2시로 변경 부탁")
+    assert out and all(it.status == "사람 처리" for it in out)
+    assert any(it.frm == "1000" and "범위" in it.note for it in out)
+
+
+def test_ignored_single_gets_visible_row(ip):
+    out = run(ip, "이미화\n장귀현 어르신 오전 10시~11시 방문, 오후 2시 전화 실적")
+    assert [(it.person, it.frm, it.to, it.kind, it.action, it.status) for it in out][0] == \
+        ("장귀현", "1000", "1100", "방문", "실적", "대기")
+    [x] = out[1:]
+    assert (x.person, x.frm, x.to, x.status) == ("장귀현", "1400", "", "사람 처리")
+    assert "시간을 범위로 적어 주세요" in x.note
