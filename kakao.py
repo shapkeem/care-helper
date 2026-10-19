@@ -77,10 +77,12 @@ class Item:
     requested_kinds: set = field(default_factory=set)  # 같은 메시지에서 같은 어르신·같은 날 요청된 서비스들
 
     def label(self):
-        t = f"{self.frm[:2]}:{self.frm[2:]}~{self.to[:2]}:{self.to[2:]}" if self.frm else "시간없음"
+        t = ""
+        if self.frm:
+            t = f"{self.frm[:2]}:{self.frm[2:]}~" + (f"{self.to[:2]}:{self.to[2:]}" if self.to else "?")
         who = f"{self.old_person}→{self.person}" if self.old_person else self.person
         d = f"{self.date:%m/%d}" if self.date else "날짜?"
-        return f"[{self.ic}] {who or '?'} {d} {t} {self.kind or ''} · {self.action or '?'}"
+        return f"{self.ic} · {who or '?'} · {d} {t or '시간없음'} {self.kind or ''} · {self.action or '?'}"
 
 
 # ---------------------------------------------------------------- 메시지 나누기
@@ -131,14 +133,54 @@ TIME_RE = re.compile(r"(?<!\d)(\d{1,2})\s*:?\s*(\d{2})\s*(?:분)?\s*[~\-–ㆍ·
 TIME_SP_RE = re.compile(r"(?<!\d)(\d{2})(\d{2})\s+(\d{2})(\d{2})(?!\d)")
 
 
+HOUR_RE = r"(?:(오전|오후)\s*)?(\d{1,2})\s*시(?!간)(?:\s*(반|(\d{1,2})\s*분))?"
+WT_RANGE_RE = re.compile(HOUR_RE + r"\s*(?:부터|에서|~|-|–)\s*" + HOUR_RE + r"(?:\s*까지)?")
+WT_DUR_RE = re.compile(HOUR_RE + r"\s*(?:부터|에서|에)\s*(?:(\d{1,3})\s*분|(\d)\s*시간(?:\s*(반))?)")
+WT_ONE_RE = re.compile(HOUR_RE)
+
+
+def _word_hm(ampm, h, half_or_min, mm):
+    """'오후 2시 반' → '1430'. 오전/오후가 없으면 1~6시는 오후(근무시간)."""
+    h, m = int(h), 30 if half_or_min == "반" else int(mm or 0)
+    if ampm == "오후" and h < 12:
+        h += 12
+    elif not ampm and 1 <= h <= 6:
+        h += 12
+    return _hm(h, m)
+
+
+def add_minutes(hhmm, minutes):
+    t = int(hhmm[:2]) * 60 + int(hhmm[2:]) + minutes
+    return _hm(t // 60, t % 60)
+
+
 def find_times(text):
-    """→ [(위치, 끝위치, HHMM, HHMM)]"""
+    """→ [(위치, 끝위치, HHMM, HHMM 또는 '')]. 끝을 모르면 ''."""
     out = []
+
+    def free(s, e):
+        return not any(s < oe and os_ < e for os_, oe, _, _ in out)
+
     for rx in (TIME_RE, TIME_SP_RE):
         for m in rx.finditer(text):
             a, b = _hm(m.group(1), m.group(2)), _hm(m.group(3), m.group(4))
-            if a and b and a < b and not any(s <= m.start() < e for s, e, _, _ in out):
+            if a and b and a < b and free(m.start(), m.end()):
                 out.append((m.start(), m.end(), a, b))
+    for m in WT_RANGE_RE.finditer(text):
+        a, b = _word_hm(*m.group(1, 2, 3, 4)), _word_hm(*m.group(5, 6, 7, 8))
+        if a and b and a < b and free(m.start(), m.end()):
+            out.append((m.start(), m.end(), a, b))
+    for m in WT_DUR_RE.finditer(text):
+        a = _word_hm(*m.group(1, 2, 3, 4))
+        mins = int(m.group(5)) if m.group(5) else int(m.group(6)) * 60 + (30 if m.group(7) else 0)
+        b = add_minutes(a, mins) if a else None
+        if a and b and free(m.start(), m.end()):
+            out.append((m.start(), m.end(), a, b))
+    if not out:  # 시작 시간만 적힌 경우 (범위가 하나라도 있으면 '9시 출근' 같은 말로 보고 안 씀)
+        for m in WT_ONE_RE.finditer(text):
+            a = _word_hm(*m.group(1, 2, 3, 4))
+            if a and free(m.start(), m.end()):
+                out.append((m.start(), m.end(), a, ""))
     return sorted(out)
 
 
@@ -439,7 +481,7 @@ class Interpreter:
             n = same_line_name(s, e) or before(names, s) or next(((p, x) for p, x in names if p > s), None)
             dd = before(dates, s) or (dates[0] if dates else None)
             kind = kind_near(s, e)
-            if not kind and int(b[:2]) * 60 + int(b[2:]) - int(a[:2]) * 60 - int(a[2:]) == 1:
+            if not kind and b and int(b[:2]) * 60 + int(b[2:]) - int(a[:2]) * 60 - int(a[2:]) == 1:
                 kind = "전화"  # 1분짜리 일정은 전화 안부 (서비스를 안 적어도)
             it = Item(ic=ic, person=n[1] if n else "", date=dd[1] if dd else msg_date, frm=a, to=b,
                       kind=kind, source=body)
