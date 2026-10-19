@@ -11,8 +11,15 @@ def set_clipboard(text):
     import ctypes
     from ctypes import wintypes
     k32, u32 = ctypes.windll.kernel32, ctypes.windll.user32
+    # 64비트에서는 인자 타입을 적어 주지 않으면 핸들이 32비트로 잘려 오류가 난다
+    k32.GlobalAlloc.argtypes = [wintypes.UINT, ctypes.c_size_t]
     k32.GlobalAlloc.restype = wintypes.HGLOBAL
+    k32.GlobalLock.argtypes = [wintypes.HGLOBAL]
     k32.GlobalLock.restype = ctypes.c_void_p
+    k32.GlobalUnlock.argtypes = [wintypes.HGLOBAL]
+    u32.OpenClipboard.argtypes = [wintypes.HWND]
+    u32.SetClipboardData.argtypes = [wintypes.UINT, wintypes.HANDLE]
+    u32.SetClipboardData.restype = wintypes.HANDLE
     data = (text or "").encode("utf-16-le") + b"\x00\x00"
     for _ in range(10):
         if u32.OpenClipboard(None):
@@ -26,8 +33,7 @@ def set_clipboard(text):
         p = k32.GlobalLock(h)
         ctypes.memmove(p, data, len(data))
         k32.GlobalUnlock(h)
-        u32.SetClipboardData(13, h)  # CF_UNICODETEXT
-        return True
+        return bool(u32.SetClipboardData(13, h))  # CF_UNICODETEXT
     finally:
         u32.CloseClipboard()
 
