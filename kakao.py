@@ -90,9 +90,11 @@ MSG_RE = re.compile(r"^\[([^\]]+)\]\s*\[(오전|오후)\s*(\d{1,2}):(\d{2})\]\s?
 DATE_LINE_RE = re.compile(r"(\d{4})년\s*(\d{1,2})월\s*(\d{1,2})일\s*[월화수목금토일]요일")
 
 
-def split_messages(text, today):
-    """→ [(대화명, 날짜, 본문)]. 날짜 줄이 없으면 today."""
-    msgs, cur_date, cur = [], today, None
+def split_messages(text, today, ics=()):
+    """→ [(대화명, 날짜, 본문)]. 날짜 줄이 없으면 today.
+    머리줄([이름] [오후 1:23])이 없으면: 지원사 이름으로 시작하는 줄이나 빈 줄에서 메시지를 나눈다."""
+    starts = sorted({n for ic in ics for n in (ic, base_name(ic)) if len(n) >= 2}, key=len, reverse=True)
+    msgs, cur_date, cur = [], today, None  # cur = [대화명, 날짜, 본문, 머리줄 없음]
     for line in text.splitlines():
         m = DATE_LINE_RE.search(line)
         if m and not MSG_RE.match(line):
@@ -101,16 +103,24 @@ def split_messages(text, today):
             continue
         m = MSG_RE.match(line)
         if m:
-            cur = [m.group(1).strip(), cur_date, m.group(5)]
+            cur = [m.group(1).strip(), cur_date, m.group(5), False]
             msgs.append(cur)
+            continue
+        s = line.strip()
+        lead = next((n for n in starts if s.startswith(n)), None)
+        if lead and (cur is None or cur[3]):
+            cur = [lead, cur_date, s[len(lead):].lstrip(" :,"), True]
+            msgs.append(cur)
+        elif not s:
+            if cur is not None and cur[3]:
+                cur = None
         elif cur is not None:
             cur[2] += "\n" + line
-        elif line.strip():
-            # 머리글 없이 붙여넣은 경우: 첫 줄이 지원사 이름일 수 있음
-            cur = ["", cur_date, line]
+        else:
+            cur = ["", cur_date, line, True]
             msgs.append(cur)
     out = []
-    for s, d, body in msgs:
+    for s, d, body, _loose in msgs:
         body = body.strip()
         if not s:  # 첫 줄을 대화명으로
             first, _, rest = body.partition("\n")
@@ -340,6 +350,13 @@ class Interpreter:
     def clients_of(self, ic):
         return [r for r in self.roster if r.get("생활지원사") == ic]
 
+    def guess_ic(self, body):
+        """보낸 사람을 모를 때: 글에 나온 어르신들의 담당 지원사가 한 명이면 그 사람."""
+        live = [r for r in self.roster if r.get("이용상태") not in STATUS_BLOCK]
+        found, _, _ = find_names(body, [r["성명"] for r in live])
+        ics = {r["생활지원사"] for _, n in found for r in live if r["성명"] == n and r.get("생활지원사")}
+        return next(iter(ics)) if len(ics) == 1 else None
+
     def ask(self, question, options):
         """사람에게 묻고 자유 답변을 Jev 로 보기 중 하나로 맞춘다."""
         return self.ask_user(question, options)
@@ -349,7 +366,8 @@ class Interpreter:
         if sender:
             ic = self.resolve_ic(sender)
         else:
-            ic = self.ask("이 요청은 어느 생활지원사 거예요?\n\n" + body[:200], {c: None for c in self.ics})
+            ic = self.guess_ic(body) or self.ask("이 요청은 어느 생활지원사 거예요?\n\n" + body[:200],
+                                                 {c: None for c in self.ics})
         if not ic:
             return [Item(ic="?", source=body, action="기타", status="사람 처리", note="지원사를 모름")]
         if not find_action_words(body) and not REQUEST_RE.search(body):  # '~댁으로 이동합니다' 같은 알림
@@ -408,6 +426,18 @@ class Interpreter:
             it.requested_kinds = {x.kind for x in items
                                   if x.person == it.person and x.date == it.date and x.kind}
         self._classify(items, body)
+        for it in items:  # 시작 시간만 있을 때: 전화는 1분, 나머지는 몇 분 했는지 묻는다
+            if not it.frm or it.to or it.action == "기타":
+                continue
+            if it.kind == "전화":
+                it.to = add_minutes(it.frm, 1)
+                continue
+            pick = self.ask(f"{it.label()}\n몇 분 동안 했어요?\n\n{body[:200]}",
+                            {"30분": None, "40분": None, "60분": None, "90분": None})
+            if pick:
+                it.to = add_minutes(it.frm, int(re.sub(r"\D", "", pick)))
+            else:
+                it.status, it.note = "사람 처리", "끝나는 시간을 몰라요"
         if any(it.frm for it in items):
             # 시간이 적힌 줄이 있으면, 시간 없이 이름만 나온 '수정/등록'은 사유 설명으로 보고 뺀다
             items = [it for it in items if it.frm or it.action not in ("수정", "일정등록")]

@@ -230,7 +230,7 @@ class KakaoJob:
         app = self.app
         try:
             if not kakao.split_messages(text, date.today()):
-                self._status("요청을 찾지 못했어요. '[이름] [오후 1:23] 내용' 형식으로 붙여넣어 주세요.")
+                self._status("붙여 넣은 글에서 요청을 찾지 못했어요.")
                 return
             with sync_playwright() as pw:
                 self._status("goodeos 연결 중...")
@@ -239,9 +239,9 @@ class KakaoJob:
                 offset = g.server_offset(page)  # '오늘'과 지난 시간 판단은 PC 시계 말고 goodeos 서버 시각으로
                 now = lambda: datetime.now() + offset
                 today = now().date()
-                msgs = kakao.split_messages(text, today)
                 roster = load_roster(app, page, today, self.log)
                 ip = kakao.Interpreter(roster, self.ask_user, today)
+                msgs = kakao.split_messages(text, today, ip.ics)
                 items = []
                 for i, (sender, d, body) in enumerate(msgs, 1):
                     if self.stopping:

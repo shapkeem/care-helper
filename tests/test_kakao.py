@@ -59,3 +59,67 @@ def test_single_time_ignored_when_range_exists():
 
 def test_add_minutes():
     assert kakao.add_minutes("1459", 1) == "1500"
+
+
+ROSTER = [
+    {"성명": "장귀현", "생활지원사": "이미화", "이용상태": "이용중", "생년월일": "1940.01.01"},
+    {"성명": "김말순", "생활지원사": "이미화", "이용상태": "이용중", "생년월일": "1938.03.03"},
+    {"성명": "형순덕", "생활지원사": "박미해", "이용상태": "이용중", "생년월일": "1942.02.02"},
+]
+
+
+@pytest.fixture
+def ip(monkeypatch):
+    def no_jev(*a, **k):
+        raise AssertionError("이 문장은 Jev 없이 풀려야 해요")
+    monkeypatch.setattr(kakao.jev, "ask", no_jev)
+    monkeypatch.setattr(kakao.jev, "choice", no_jev)
+
+    def no_ask(q, opts):
+        raise AssertionError("묻지 않아야 해요: " + q)
+    return kakao.Interpreter(ROSTER, no_ask, MON)
+
+
+def run(ip, text):
+    out = []
+    for s, d, body in kakao.split_messages(text, MON, ip.ics):
+        out += ip.interpret(s, d, body)
+    return out
+
+
+def test_split_without_header():
+    msgs = kakao.split_messages("이미화 장귀현 어르신 방문 실적요\n\n박미해 형순덕님 전화 입력요", MON, ["이미화", "박미해"])
+    assert [(s, b) for s, _, b in msgs] == [("이미화", "장귀현 어르신 방문 실적요"), ("박미해", "형순덕님 전화 입력요")]
+
+
+def test_split_header_kept():
+    msgs = kakao.split_messages("[이미화] [오후 2:01] 장귀현 어르신 방문\n이어지는 줄", MON, ["이미화"])
+    assert msgs == [("이미화", MON, "장귀현 어르신 방문\n이어지는 줄")]
+
+
+def test_casual_visit(ip):
+    [it] = run(ip, "이미화\n장귀현 어르신 어제 2시 반부터 30분 방문 기록 좀 넣어줘요")
+    assert (it.ic, it.person, it.date, it.frm, it.to, it.kind, it.action) == \
+        ("이미화", "장귀현", date(2026, 10, 18), "1430", "1500", "방문", "실적")
+
+
+def test_no_sender_phone_fills_end(ip):
+    [it] = run(ip, "형순덕님 18일 전화 1시 빠졌어요")
+    assert (it.ic, it.person, it.date, it.frm, it.to, it.kind, it.action) == \
+        ("박미해", "형순덕", date(2026, 10, 18), "1300", "1301", "전화", "일정등록")
+
+
+def test_header_format_still_works(ip):
+    [it] = run(ip, "[이미화] [오후 2:01] 장귀현 어르신 10/18 0918~0919 전화 입력부탁드립니다")
+    assert (it.person, it.date, it.frm, it.to, it.kind, it.action) == \
+        ("장귀현", date(2026, 10, 18), "0918", "0919", "전화", "일정등록")
+
+
+def test_visit_without_end_asks(monkeypatch):
+    monkeypatch.setattr(kakao.jev, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    asked = []
+    ip2 = kakao.Interpreter(ROSTER, lambda q, o: asked.append(o) or "30분", MON)
+    [it] = [x for s, d, b in kakao.split_messages("이미화\n김말순 어르신 어제 2시 방문 실적 부탁", MON, ip2.ics)
+            for x in ip2.interpret(s, d, b)]
+    assert asked and "30분" in asked[0]
+    assert (it.frm, it.to) == ("1400", "1430")
