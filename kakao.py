@@ -22,20 +22,25 @@ CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": 
 # 요청 낱말 → 요청 종류. 그 줄 뒤에 처음 나오는 낱말로 정한다 (앞의 것이 먼저 맞으면 뒤의 것은 보지 않음)
 ACTION_WORDS = [
     (r"실적\s*(시간)?\s*입력", "실적"), (r"수정\s*실적", "수정"), (r"입력\s*(및|\.|,)?\s*(실적|실행)", "일정등록"),
-    (r"삭제|취소|빼\s*주|지워|못\s*가(?!져)|못\s*갔|안\s*갔", "삭제"), (r"수정|변경|조정|바꿔|옮겨|당겨|미뤄", "수정"),
+    (r"삭제|취소|빼\s*주|지워", "삭제"), (r"수정|변경|조정|바꿔|옮겨|당겨|미뤄", "수정"),
     (r"실적|실행|기록", "실적"), (r"입력|넣어|빠져|빠졌|빠진|누락|추가", "일정등록"),
 ]
+# '못 가요' 같은 말은 사정 설명일 때가 많아서, 다른 요청 낱말이 하나도 없을 때만 삭제로 본다
+WEAK_ACTION_WORDS = [(r"못\s*가(?!져)|못\s*갔|안\s*갔", "삭제")]
 
 
 def find_action_words(text):
     """→ [(위치, 요청 종류)] 겹치는 낱말은 앞 규칙 우선"""
-    out, used = [], []
-    for rx, act in ACTION_WORDS:
-        for m in re.finditer(rx, text):
-            if not any(s <= m.start() < e for s, e in used):
-                out.append((m.start(), act))
-                used.append((m.start(), m.end()))
-    return sorted(out)
+    for rules in (ACTION_WORDS, WEAK_ACTION_WORDS):
+        out, used = [], []
+        for rx, act in rules:
+            for m in re.finditer(rx, text):
+                if not any(s <= m.start() < e for s, e in used):
+                    out.append((m.start(), act))
+                    used.append((m.start(), m.end()))
+        if out:
+            return sorted(out)
+    return []
 REQUEST_RE = re.compile(r"부탁|해\s*주|주세요|바랍니다|요청")
 DUP_RE = re.compile(r"중복|두\s*번\s*들어")  # 중복 정리는 어느 것을 지울지 사람이 판단
 STATUS_BLOCK = {"종결", "장기부재", "타기관이전"}
@@ -124,7 +129,8 @@ def split_messages(text, today, ics=()):
         body = body.strip()
         if not s:  # 첫 줄을 대화명으로
             first, _, rest = body.partition("\n")
-            if rest and len(first.strip()) <= 12 and not re.search(r"\d", first):
+            ok = first.strip() in starts if ics else len(first.strip()) <= 12 and not re.search(r"\d", first)
+            if rest and ok:  # 지원사 명단이 있으면 그 이름과 똑같은 줄만 (어르신 이름 줄을 보낸 사람으로 읽지 않게)
                 s, body = first.strip(), rest.strip()
         if body and body not in ("사진", "메시지가 삭제되었습니다.") and not body.startswith("파일:"):
             out.append((s, d, body))
@@ -143,8 +149,11 @@ TIME_RE = re.compile(r"(?<!\d)(\d{1,2})\s*:?\s*(\d{2})\s*(?:분)?\s*[~\-–ㆍ·
 TIME_SP_RE = re.compile(r"(?<!\d)(\d{2})(\d{2})\s+(\d{2})(\d{2})(?!\d)")
 
 
-HOUR_RE = r"(?:(오전|오후)\s*)?(\d{1,2})\s*시(?!간)(?:\s*(반|(\d{1,2})\s*분))?"
-WT_RANGE_RE = re.compile(HOUR_RE + r"\s*(?:부터|에서|~|-|–)\s*" + HOUR_RE + r"(?:\s*까지)?")
+AMPM = r"(오전|오후|아침|새벽|저녁|밤)"
+PM_WORDS = {"오후", "저녁", "밤"}
+HOUR_RE = r"(?:" + AMPM + r"\s*)?(\d{1,2})\s*시(?!간)(?:\s*(반|(\d{1,2})\s*분))?"
+EP_RE = r"(?:" + AMPM + r"\s*)?(?:(\d{1,2}):(\d{2})|(\d{1,2})\s*시(?!간)(?:\s*(반|(\d{1,2})\s*분))?)"  # 범위 끝 (2:30 도 됨)
+WT_RANGE_RE = re.compile(EP_RE + r"\s*(?:부터|에서|~|-|–)\s*" + EP_RE + r"(?:\s*까지)?")
 WT_DUR_RE = re.compile(HOUR_RE + r"\s*(?:부터|에서|에)\s*(?:(\d{1,3})\s*분|(\d)\s*시간(?:\s*(반))?)")
 WT_ONE_RE = re.compile(HOUR_RE)
 
@@ -152,7 +161,7 @@ WT_ONE_RE = re.compile(HOUR_RE)
 def _word_hm(ampm, h, half_or_min, mm):
     """'오후 2시 반' → '1430'. 오전/오후가 없으면 1~6시는 오후(근무시간)."""
     h, m = int(h), 30 if half_or_min == "반" else int(mm or 0)
-    if ampm == "오후" and h < 12:
+    if ampm in PM_WORDS and h < 12:
         h += 12
     elif not ampm and 1 <= h <= 6:
         h += 12
@@ -160,13 +169,46 @@ def _word_hm(ampm, h, half_or_min, mm):
 
 
 def add_minutes(hhmm, minutes):
+    """24:00 을 넘으면 None (끝 시간을 모르는 것으로)"""
     t = int(hhmm[:2]) * 60 + int(hhmm[2:]) + minutes
-    return _hm(t // 60, t % 60)
+    return _hm(t // 60, t % 60) if t < 24 * 60 else None
+
+
+def _mins(hhmm):
+    return int(hhmm[:2]) * 60 + int(hhmm[2:])
+
+
+def _ep(g):
+    """범위 끝 하나의 그룹 6개 → (오전/오후 낱말, HHMM)"""
+    ampm, ch, cm, h, half, mm = g
+    return ampm, (_word_hm(ampm, ch, None, cm) if ch else _word_hm(ampm, h, half, mm))
+
+
+def _range(m):
+    """'오후 7시~8시' → ('1900', '2000'). 끝에 오전/오후가 없으면 시작 것을 따르고, 그래도 거꾸로면 12시간 뒤로."""
+    (pa, a), (pb, b) = _ep(m.group(*range(1, 7))), _ep(m.group(*range(7, 13)))
+    if a and not pb and pa:
+        b = _ep((pa,) + m.group(*range(8, 13)))[1]
+    if a and b and not pb and b <= a and int(b[:2]) < 12:  # 12시간 뒤로 옮긴 게 4시간 안일 때만 ('11시~10시'는 못 읽음)
+        b2 = _hm(int(b[:2]) + 12, b[2:])
+        if b2 and a < b2 and _mins(b2) - _mins(a) <= 240:
+            b = b2
+    return (a, b) if a and b and a < b else (None, None)
+
+
+def bad_time_spans(text):
+    """범위처럼 생겼는데 알아보지 못한 시간 ('11시~10시', '1100~1000') → [(위치, 끝위치)]"""
+    return _scan_times(text)[1]
 
 
 def find_times(text):
     """→ [(위치, 끝위치, HHMM, HHMM 또는 '')]. 끝을 모르면 ''."""
-    out = []
+    return _scan_times(text)[0]
+
+
+def _scan_times(text):
+    """→ (시간들, 못 읽은 범위들)"""
+    out, bad = [], []
 
     def free(s, e):
         return not any(s < oe and os_ < e for os_, oe, _, _ in out)
@@ -176,22 +218,29 @@ def find_times(text):
             a, b = _hm(m.group(1), m.group(2)), _hm(m.group(3), m.group(4))
             if a and b and a < b and free(m.start(), m.end()):
                 out.append((m.start(), m.end(), a, b))
+            elif rx is TIME_RE and a and b and a >= b:
+                bad.append((m.start(), m.end()))
+    blocked = []  # 범위처럼 생긴 곳: 못 읽어도 따로 떨어진 시간 두 개로 읽지 않는다
     for m in WT_RANGE_RE.finditer(text):
-        a, b = _word_hm(*m.group(1, 2, 3, 4)), _word_hm(*m.group(5, 6, 7, 8))
-        if a and b and a < b and free(m.start(), m.end()):
+        a, b = _range(m)
+        blocked.append((m.start(), m.end()))
+        if a and free(m.start(), m.end()):
             out.append((m.start(), m.end(), a, b))
+        elif not a and free(m.start(), m.end()):
+            bad.append((m.start(), m.end()))
     for m in WT_DUR_RE.finditer(text):
         a = _word_hm(*m.group(1, 2, 3, 4))
         mins = int(m.group(5)) if m.group(5) else int(m.group(6)) * 60 + (30 if m.group(7) else 0)
         b = add_minutes(a, mins) if a else None
         if a and b and free(m.start(), m.end()):
             out.append((m.start(), m.end(), a, b))
-    if not out:  # 시작 시간만 적힌 경우 (범위가 하나라도 있으면 '9시 출근' 같은 말로 보고 안 씀)
-        for m in WT_ONE_RE.finditer(text):
-            a = _word_hm(*m.group(1, 2, 3, 4))
-            if a and free(m.start(), m.end()):
-                out.append((m.start(), m.end(), a, ""))
-    return sorted(out)
+    # 시작 시간만 적힌 경우 (같은 줄에 범위가 있으면 '9시 출근' 같은 말로 보고 안 씀)
+    lines = {text.count("\n", 0, s) for s, _ in blocked} | {text.count("\n", 0, s) for s, _, _, _ in out}
+    for m in WT_ONE_RE.finditer(text):
+        a = _word_hm(*m.group(1, 2, 3, 4))
+        if a and free(m.start(), m.end()) and text.count("\n", 0, m.start()) not in lines:
+            out.append((m.start(), m.end(), a, ""))
+    return sorted(out), bad
 
 
 def resolve_day(month, day, today):
@@ -432,18 +481,27 @@ class Interpreter:
             st0 = next((r.get("이용상태", "") for r in rows if r["성명"] == it.person), "")
             if it.kind.startswith("!") or st0 in STATUS_BLOCK:  # 아래에서 어차피 사람 처리
                 continue
-            if it.kind == "전화" or it.action == "삭제":  # 삭제는 일정 시작과 겹치는 시간이면 돼요
-                it.to = add_minutes(it.frm, 1)
+            if it.action not in ("실적", "일정등록", "삭제"):  # 수정은 끝을 짐작하면 다른 일정을 지울 수 있어요
+                it.status, it.note = "사람 처리", "바꿀 시간을 범위로 적어 주세요 (예: 1000~1100)"
                 continue
-            pick = self.ask(f"{it.label()}\n몇 분 동안 했어요?\n\n{body[:200]}",
-                            {"30분": None, "40분": None, "60분": None, "90분": None})
-            if pick:
-                it.to = add_minutes(it.frm, int(re.sub(r"\D", "", pick)))
+            if it.kind == "전화" or it.action == "삭제":  # 삭제는 일정 시작과 겹치는 시간이면 돼요
+                it.to = add_minutes(it.frm, 1) or ""
             else:
+                pick = self.ask(f"{it.label()}\n몇 분 동안 했어요?\n\n{body[:200]}",
+                                {"30분": None, "40분": None, "60분": None, "90분": None})
+                if pick:
+                    it.to = add_minutes(it.frm, int(re.sub(r"\D", "", pick))) or ""
+            if not it.to:
                 it.status, it.note = "사람 처리", "끝나는 시간을 몰라요"
-        if any(it.frm for it in items):
-            # 시간이 적힌 줄이 있으면, 시간 없이 이름만 나온 '수정/등록'은 사유 설명으로 보고 뺀다
-            items = [it for it in items if it.frm or it.action not in ("수정", "일정등록")]
+        bad = bad_time_spans(body)
+        for it in items:
+            if it.frm or it.status != "대기":
+                continue
+            if bad:  # 시간을 적었는데 못 읽었으면, 시간 없는 요청으로 처리하지 않는다
+                it.status, it.note = "사람 처리", "시간을 알아보지 못했어요 (예: 1000~1100 으로 적어 주세요)"
+            elif it.action in ("수정", "일정등록") and any(x.frm for x in items):
+                # 다른 줄에는 시간이 있는데 이 어르신은 이름만 나옴: 사유 설명일 수도 있어서 사람이 본다
+                it.status, it.note = "사람 처리", "이 어르신은 시간이 없어요 (다른 줄 설명이면 무시해 주세요)"
         for it in items:
             st = next((r.get("이용상태", "") for r in rows if r["성명"] == it.person), "")
             if st in STATUS_BLOCK:
@@ -510,7 +568,13 @@ class Interpreter:
             return min(on_line, key=lambda px: min(abs(px[0] - s), abs(px[0] - e)))
 
         items = []
+        has_range = any(b for _, _, _, b in times)
         for s, e, a, b in times:
+            ls = body.rfind("\n", 0, s) + 1
+            le = body.find("\n", e)
+            le = len(body) if le < 0 else le
+            if not b and has_range and not same_line_name(s, e) and not any(ls <= p < le for p, _ in kinds):
+                continue  # '9시 출근했어요' 처럼 어르신·서비스 없는 줄의 시각 (다른 줄에 범위 시간이 있을 때)
             n = same_line_name(s, e) or before(names, s) or next(((p, x) for p, x in names if p > s), None)
             dd = before(dates, s) or (dates[0] if dates else None)
             kind = kind_near(s, e)

@@ -145,3 +145,74 @@ def test_blocked_person_not_asked(monkeypatch):
         out += ip2.interpret(s, d, b)
     [it] = out
     assert it.status == "사람 처리"
+
+
+# ---------------------------------------------------------------- 최종 검토 수정
+def test_weak_delete_words_yield(ip):
+    [it] = run(ip, "이미화\n장귀현 어르신 2시 외출 못 가셔서 방문으로 변경 부탁")
+    assert it.action == "수정"
+    [it] = run(ip, "이미화\n김말순 어르신 어제 1000~1100 방문 했는데 못 갔다고 나와요 실적 부탁")
+    assert (it.action, it.frm, it.to) == ("실적", "1000", "1100")
+    [it] = run(ip, "이미화\n김말순 어르신 내일 2시 방문 못가요")
+    assert it.action == "삭제"
+
+
+def test_modify_single_time_goes_to_person(ip):
+    for text in ("형순덕 어르신 2시에 병원 가셔서 전화 4시로 변경 부탁드려요",
+                 "이미화\n장귀현 어르신 10시 방문 11시로 옮겨주세요"):
+        out = run(ip, text)
+        assert out, text
+        for it in out:
+            assert it.status == "사람 처리" and it.to == "", (text, it.label())
+            assert "범위" in it.note
+
+
+def test_range_ampm():
+    assert times("오후 7시~8시 전화") == [("1900", "2000")]
+    assert times("오후 6시~7시 방문") == [("1800", "1900")]
+    assert times("저녁 7시 전화") == [("1900", "")]
+    assert times("아침 8시 방문") == [("0800", "")]
+    assert times("새벽 5시 전화") == [("0500", "")]
+    assert times("오전 11시~1시 방문") == [("1100", "1300")]
+    assert times("2:30~3시 방문") == [("1430", "1500")]
+
+
+def test_bad_range_not_split_into_singles(ip):
+    assert times("11시~10시 방문") == []
+    [it] = run(ip, "이미화\n장귀현 어르신 11시~10시 방문 실적")
+    assert it.status == "사람 처리" and not it.frm
+
+
+def test_single_time_kept_on_other_line(ip):
+    out = run(ip, "이미화\n장귀현 1시 반~2시 방문 실적\n김말순 어르신 3시 전화 입력 부탁")
+    assert [(it.person, it.frm, it.to, it.kind, it.status) for it in out] == [
+        ("장귀현", "1330", "1400", "방문", "대기"), ("김말순", "1500", "1501", "전화", "대기")]
+
+
+def test_timeless_item_not_dropped(ip):
+    out = run(ip, "이미화\n장귀현 어르신 2시~3시 방문 입력 부탁\n김말순 어르신도 입력 부탁")
+    assert [it.person for it in out] == ["장귀현", "김말순"]
+    assert out[0].status == "대기"
+    assert out[1].status == "사람 처리" and out[1].note
+
+
+def test_first_line_not_sender_unless_worker(ip):
+    text = "장귀현 어르신\n어제 2시 반부터 30분 방문 기록 좀 넣어줘요"
+    msgs = kakao.split_messages(text, MON, ["이미화", "박미해"])
+    assert [(s, b) for s, _, b in msgs] == [("", text)]
+    [it] = run(ip, text)
+    assert (it.ic, it.person, it.date, it.frm, it.to, it.kind, it.action, it.status) == \
+        ("이미화", "장귀현", date(2026, 10, 18), "1430", "1500", "방문", "실적", "대기")
+
+
+def test_end_past_midnight_goes_to_person(monkeypatch):
+    monkeypatch.setattr(kakao.jev, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError()))
+    ip2 = kakao.Interpreter(ROSTER, lambda q, o: "90분", MON)
+    [it] = [x for s, d, b in kakao.split_messages("이미화\n김말순 어르신 어제 밤 11시 방문 실적 부탁", MON, ip2.ics)
+            for x in ip2.interpret(s, d, b)]
+    assert it.to == "" and it.status == "사람 처리"
+
+
+def test_single_time_on_unrelated_line_ignored(ip):
+    [it] = run(ip, "이미화\n오늘 9시 출근했어요\n장귀현 2시~3시 방문 실적")
+    assert (it.person, it.frm, it.to) == ("장귀현", "1400", "1500")
