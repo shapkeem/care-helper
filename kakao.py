@@ -22,8 +22,8 @@ CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": 
 # 요청 낱말 → 요청 종류. 그 줄 뒤에 처음 나오는 낱말로 정한다 (앞의 것이 먼저 맞으면 뒤의 것은 보지 않음)
 ACTION_WORDS = [
     (r"실적\s*(시간)?\s*입력", "실적"), (r"수정\s*실적", "수정"), (r"입력\s*(및|\.|,)?\s*(실적|실행)", "일정등록"),
-    (r"삭제|취소|빼\s*주|지워", "삭제"), (r"수정|변경|조정|바꿔", "수정"),
-    (r"실적|실행", "실적"), (r"입력|넣어|빠져|추가", "일정등록"),
+    (r"삭제|취소|빼\s*주|지워|못\s*가|못\s*갔|안\s*갔", "삭제"), (r"수정|변경|조정|바꿔|옮겨|당겨|미뤄", "수정"),
+    (r"실적|실행|기록", "실적"), (r"입력|넣어|빠져|빠졌|빠진|누락|추가", "일정등록"),
 ]
 
 
@@ -183,6 +183,10 @@ def find_dates(text, msg_date):
         d = resolve_day(None, int(m.group(1)), msg_date)
         if d:
             out.append((m.start(), d))
+    for m in re.finditer(r"(지난\s*주|저번\s*주|이번\s*주|다음\s*주)\s*([월화수목금토일])\s*(?:요일|욜)?", text):
+        monday = msg_date - timedelta(days=msg_date.weekday())
+        shift = {"지": -7, "저": -7, "이": 0, "다": 7}[m.group(1)[0]]
+        out.append((m.start(), monday + timedelta(days=shift + "월화수목금토일".index(m.group(2)))))
     for word, delta in (("그저께", -2), ("어제", -1), ("오늘", 0), ("내일", 1), ("낼", 1)):
         for m in re.finditer(word, text):
             out.append((m.start(), msg_date + timedelta(days=delta)))
