@@ -726,6 +726,13 @@ class TkUI:
         self.conv_refresh()
 
     def c_do_start(self):
+        try:
+            left = self.api.conv_info()["leftovers"]
+        except Exception:
+            left = 0
+        if left and messagebox.askyesno(self.app.APP_NAME, f"'작업후' 폴더에 이전 변환 파일 {left}개가 있어요.\n"
+                                        "휴지통으로 보내고 시작할까요?\n(아니오를 누르면 그대로 두고 시작해요)"):
+            self.toast(self.api.conv_clear_leftovers())
         e = self.api.conv_start()
         if e:
             self.c_set(e, True)

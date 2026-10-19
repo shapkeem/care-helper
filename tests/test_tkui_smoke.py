@@ -30,3 +30,43 @@ def test_build_and_widgets():
         ui.root.update()
     finally:
         ui.root.destroy()
+
+
+def _start_ui_with_leftovers(tkui, monkeypatch, answer):
+    ui = tkui.TkUI(load_app())
+    ui.build()
+    ui.root.update()
+    cleared = []
+    asked = []
+    ui.api.conv_info = lambda: {"leftovers": 2}
+    ui.api.conv_clear_leftovers = lambda: (cleared.append(True), "휴지통으로 보냈어요")[1]
+    ui.api.conv_start = lambda: "중단"
+
+    def fake_askyesno(title, message, **kw):
+        asked.append(message)
+        return answer
+
+    monkeypatch.setattr(tkui.messagebox, "askyesno", fake_askyesno)
+    return ui, cleared, asked
+
+
+def test_start_asks_about_leftovers_and_clears_on_yes(monkeypatch):
+    import tkui
+    ui, cleared, asked = _start_ui_with_leftovers(tkui, monkeypatch, True)
+    try:
+        ui.c_do_start()
+        assert len(cleared) == 1
+        assert len(asked) == 1 and "2개" in asked[0]
+    finally:
+        ui.root.destroy()
+
+
+def test_start_keeps_leftovers_on_no(monkeypatch):
+    import tkui
+    ui, cleared, asked = _start_ui_with_leftovers(tkui, monkeypatch, False)
+    try:
+        ui.c_do_start()
+        assert cleared == []
+        assert len(asked) == 1
+    finally:
+        ui.root.destroy()
