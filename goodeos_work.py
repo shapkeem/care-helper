@@ -7,7 +7,7 @@
 """
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 SITE = "https://goodeos.co.kr"
 PLAN_URL = SITE + "/plan/ic_plan_new.php?menuTopId=C&menuLeftId=1_09"
@@ -398,10 +398,56 @@ def do_modify(page, dlg, ic, old, new, log, now=None):
     return do_register(page, dlg, ic, new["person"], new["date"], new["frm"], new["to"], new["kind"], log, now)
 
 
+def clear_days(page, dlg, ic, days, log):
+    """지원사별 일정등록에서 그날 칸의 [X](그날 일정 한꺼번에 삭제)를 누른다. 실적 있는 일정은 goodeos 가 남긴다.
+    days: date 들. → 지운 일정 수"""
+    by_month = {}
+    for d in sorted(set(days)):
+        by_month.setdefault(plan_month(d), []).append(d)
+    total = 0
+    for (y, mo), ds in by_month.items():
+        open_plan(page, ic, y, mo)
+        if f"'yymm':'{y}{mo:02d}'" not in page.evaluate("() => String(window.IcPlanDelete || '')"):
+            raise WorkError(f"{ic} 선생님 {y}년 {mo}월 일정 창의 삭제 기능을 확인하지 못했어요. 지우지 않고 멈췄어요.")
+        for d in ds:
+            info = page.evaluate("""(ds) => {
+                const td = document.querySelector('#DIV_LAYER #TBL_PLAN td[date="' + ds + '"]');
+                if (!td) return null;
+                const b = td.querySelector('button[onclick^=IcPlanDelete]');  // 그 칸의 [X]가 부르는 값 그대로
+                const a = b ? (b.getAttribute('onclick').match(/IcPlanDelete\\('([^']*)',\\s*'([^']*)'\\)/) || []) : [];
+                return {weekly: a[1] || null, idx: a[2] || null,
+                        n: td.querySelectorAll('div[nick=ILJUNG]').length,
+                        free: td.querySelectorAll('div[nick=ILJUNG][result_flag=N]').length};
+            }""", f"{d:%Y%m%d}")
+            if info is None or info["weekly"] is None:
+                raise WorkError(f"{ic} 선생님 {d:%m/%d} 칸을 찾지 못했어요. 지우지 않고 멈췄어요.")
+            if not info["free"]:
+                continue
+            m = dlg.mark()
+            page.evaluate("(a) => IcPlanDelete(a.w, a.i)", {"w": info["weekly"], "i": info["idx"]})
+            if not dlg.wait_for(m, "정상적으로 처리되었습니다", timeout=60):
+                raise WorkError(f"{ic} 선생님 {d:%m/%d} 일정을 지웠는지 확인하지 못했어요: "
+                                + (" / ".join(dlg.since(m)) or "응답 없음"))
+            kept = info["n"] - info["free"]
+            log(f"  기존 일정 삭제: {ic} {d:%m/%d} {info['free']}개" + (f" (실적 있는 {kept}개는 남김)" if kept else ""))
+            total += info["free"]
+    close_layer(page)
+    return total
+
+
+def _preview_date(text):
+    digits = re.sub(r"\D", "", text or "")
+    try:
+        return date(int(digits[:4]), int(digits[4:6]), int(digits[6:8])) if len(digits) >= 8 else None
+    except ValueError:
+        return None
+
+
 # ================================================================ 일정 엑셀 등록 (지원사별 일정등록 > 일정엑셀등록)
-def upload_plan_excel(page, dlg, path, log, save=True, save_timeout=900):
+def upload_plan_excel(page, dlg, path, log, save=True, save_timeout=900, clear=True):
     """엑셀을 올려 미리보기를 받고, 오류 없는 줄을 모두 골라 일정등록한다.
     오류 줄(goodeos 가 체크박스를 주지 않는 줄)은 로그에 남기고 등록하지 않는다.
+    clear=True 면 등록 전에, 등록할 줄의 지원사·날짜에 이미 있는 일정을 그날 [X]로 지운다 (다른 탭에서).
     → {"total": 줄 수, "ok": 등록할 줄 수, "errors": [문구], "saved": 등록 여부}"""
     page.goto(PLAN_URL)
     page.wait_for_load_state()
@@ -429,6 +475,22 @@ def upload_plan_excel(page, dlg, path, log, save=True, save_timeout=900):
     if not save or ok == 0:
         page.evaluate("() => { $('#DIV_LAYER').html('').parent().hide(); }")
         return result
+    if clear:
+        days = {}
+        for r in rows:
+            d = _preview_date(r["date"])
+            if r["ok"] and d is None:
+                raise WorkError(f"미리보기 날짜 '{r['date']}'를 읽지 못했어요. 등록하지 않고 멈췄어요.")
+            if r["ok"]:
+                days.setdefault(r["worker"], set()).add(d)
+        log(f"이미 올라와 있는 일정을 지우는 중... ({len(days)}명)")
+        tab = page.context.new_page()  # 미리보기 창은 그대로 두고 다른 탭에서 지운다
+        tab.on("dialog", lambda d: d.accept())
+        try:
+            n = sum(clear_days(tab, Dialogs(tab), ic, ds, log) for ic, ds in sorted(days.items()))
+        finally:
+            tab.close()
+        log(f"기존 일정 {n}개를 지웠어요.")
     page.locator("#DIV_LAYER #chkAll").check()  # 일자 왼쪽 전체선택 (오류 줄은 체크박스가 없어 빠진다)
     n = page.evaluate("() => document.querySelectorAll('#DIV_LAYER input[id^=chk_]:checked').length")
     if n != ok:
