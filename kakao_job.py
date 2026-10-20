@@ -161,6 +161,8 @@ class KakaoJob:
         self.running = False
         self.stopping = False
         self.answers = queue.Queue()
+        self._lock = threading.Lock()
+        self._ask_lock = threading.Lock()
         self._next_id = 0
 
     # ---- 화면에서 부르는 것
@@ -203,6 +205,10 @@ class KakaoJob:
 
     def ask_user(self, question, options):
         """작업 스레드에서 호출: 질문을 띄우고 답을 기다린다. 자유 답변은 Jev 로 보기에 맞춘다."""
+        with self._ask_lock:  # 여러 탭이 동시에 물어도 질문은 한 번에 하나씩
+            return self._ask_one(question, options)
+
+    def _ask_one(self, question, options):
         base = question
         while True:
             if self.stopping:
@@ -225,6 +231,53 @@ class KakaoJob:
                 return k
             question = f"'{a}' 은(는) 잘 모르겠어요. 보기에서 고르거나 다시 말씀해 주세요.\n\n{base}"
 
+    def _run_one(self, page, dlg, it, now, counter):
+        if self.stopping:
+            it.status, it.note = "멈춤", ""
+            self._set_row(it)
+            return
+        with self._lock:
+            counter[0] += 1
+            self._status(f"처리 중... ({counter[0]}/{counter[1]})")
+        it.status = "처리 중"
+        self._set_row(it)
+        self.log(f"▶ {it.label()}")
+        try:
+            runner.run_item(page, dlg, it, self.ask_user, self.log, now=now())
+            it.status, it.note = "완료", ""
+        except g.WorkError as e:
+            it.status, it.note = ("건너뜀", "") if str(e) == "건너뜀" else ("확인 필요", str(e))
+            self.log(f"  {it.status}: {e}")
+        except Exception as e:
+            it.status, it.note = "오류", str(e)[:200]
+            self.log(f"  오류: {e}")
+        self._set_row(it)
+
+    def _run_parallel(self, todo, now):
+        """지원사별로 묶어 서로 다른 지원사는 탭 3개로 동시에, 같은 지원사는 차례로 처리한다.
+        (goodeos 는 일정을 저장할 때 그 지원사의 한 달 일정 전체를 보내서, 같은 지원사를 동시에 고치면 서로 덮어쓴다)"""
+        from concurrent.futures import ThreadPoolExecutor
+        groups = {}
+        for it in todo:
+            groups.setdefault(it.ic, []).append(it)
+        counter = [0, len(todo)]
+
+        def run_group(items):
+            def work(tab):
+                dlg = g.Dialogs(tab)
+                for it in items:
+                    self._run_one(tab, dlg, it, now, counter)
+            try:
+                self.app.in_new_tab(work)
+            except Exception as e:  # 탭을 못 열었을 때: 그 지원사 항목만 오류로
+                for it in items:
+                    if it.status in ("대기", "처리 중"):
+                        it.status, it.note = "오류", str(e)[:200]
+                        self._set_row(it)
+
+        with ThreadPoolExecutor(max_workers=3) as ex:
+            list(ex.map(run_group, groups.values()))
+
     def _work(self, text):
         from playwright.sync_api import sync_playwright
         app = self.app
@@ -235,7 +288,6 @@ class KakaoJob:
             with sync_playwright() as pw:
                 self._status("goodeos 연결 중...")
                 page = app.get_page(pw)
-                dlg = g.Dialogs(page)
                 offset = g.server_offset(page)  # '오늘'과 지난 시간 판단은 PC 시계 말고 goodeos 서버 시각으로
                 now = lambda: datetime.now() + offset
                 today = now().date()
@@ -251,25 +303,7 @@ class KakaoJob:
                         items.append(it)
                         self._set_row(it)
                 todo = [it for it in items if it.status == "대기"]
-                for n, it in enumerate(todo, 1):
-                    if self.stopping:
-                        it.status, it.note = "멈춤", ""
-                        self._set_row(it)
-                        continue
-                    self._status(f"처리 중... ({n}/{len(todo)})")
-                    it.status = "처리 중"
-                    self._set_row(it)
-                    self.log(f"▶ {it.label()}")
-                    try:
-                        runner.run_item(page, dlg, it, self.ask_user, self.log, now=now())
-                        it.status, it.note = "완료", ""
-                    except g.WorkError as e:
-                        it.status, it.note = ("건너뜀", "") if str(e) == "건너뜀" else ("확인 필요", str(e))
-                        self.log(f"  {it.status}: {e}")
-                    except Exception as e:
-                        it.status, it.note = "오류", str(e)[:200]
-                        self.log(f"  오류: {e}")
-                    self._set_row(it)
+                self._run_parallel(todo, now)
                 done = sum(it.status == "완료" for it in items)
                 head = "멈춤" if self.stopping else "끝"
                 self._status(f"{head} · 완료 {done}건 / 전체 {len(items)}건")
