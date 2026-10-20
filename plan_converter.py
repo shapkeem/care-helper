@@ -6,6 +6,7 @@
   생활지원사 생년월일 검증은 goodeos 에서 받은 지원사 명단으로 한다.
 """
 import calendar
+import html
 import os
 import re
 import zipfile
@@ -78,7 +79,7 @@ def find_source_excels(folder):
 
     matches = [
         f for f in matches
-        if any(k in f.stem for k in TITLE_KEYWORDS) and not f.name.startswith("~$")
+        if not f.name.startswith("~$") and (any(k in f.stem for k in TITLE_KEYWORDS) or _has_plan_headers(f))
     ]
 
     if not matches:
@@ -86,6 +87,25 @@ def find_source_excels(folder):
 
     matches.sort(key=_natural_sort_key)
     return matches
+
+
+PLAN_HEADER_MARKS = ("서비스일자", "대상자명", "생활지원사명", "서비스코드")
+
+
+def _has_plan_headers(path):
+    """파일 이름에 '제공/계획서'가 없어도 일정실적업로드 양식 머리글이 있으면 제공계획서로 본다.
+    xlsx 는 글자 목록(sharedStrings)만, xls 는 파일 글자만 훑어서 빠르게 확인한다."""
+    try:
+        data = Path(path).read_bytes()
+        if data[:2] == b"PK":
+            with zipfile.ZipFile(io.BytesIO(data)) as z:
+                texts = [html.unescape(z.read(n).decode("utf-8", "ignore")) for n in z.namelist()
+                         if n == "xl/sharedStrings.xml" or n.startswith("xl/worksheets/sheet")]
+        else:
+            texts = [data.decode(enc, "ignore") for enc in ("utf-8", "cp949", "utf-16-le")]
+    except Exception:
+        return False
+    return any(all(m in t for m in PLAN_HEADER_MARKS) for t in texts)
 
 
 def _extract_person_name(stem: str) -> str:
