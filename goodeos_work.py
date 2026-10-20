@@ -399,7 +399,8 @@ def do_modify(page, dlg, ic, old, new, log, now=None):
 
 
 def clear_days(page, dlg, ic, days, log):
-    """지원사별 일정등록에서 그날 칸의 [X](그날 일정 한꺼번에 삭제)를 누른다. 실적 있는 일정은 goodeos 가 남긴다.
+    """지원사별 일정등록에서 그날 칸의 [X](그날 일정 한꺼번에 삭제)를 누른다.
+    실적 있는 일정은 [X]로 지워지지 않으므로 남기고 로그로 알린다 (업로드는 실적을 지우지 않는다).
     days: date 들. → 지운 일정 수"""
     by_month = {}
     for d in sorted(set(days)):
@@ -421,16 +422,19 @@ def clear_days(page, dlg, ic, days, log):
             }""", f"{d:%Y%m%d}")
             if info is None or info["weekly"] is None:
                 raise WorkError(f"{ic} 선생님 {d:%m/%d} 칸을 찾지 못했어요. 지우지 않고 멈췄어요.")
-            if not info["free"]:
-                continue
-            m = dlg.mark()
-            page.evaluate("(a) => IcPlanDelete(a.w, a.i)", {"w": info["weekly"], "i": info["idx"]})
-            if not dlg.wait_for(m, "정상적으로 처리되었습니다", timeout=60):
-                raise WorkError(f"{ic} 선생님 {d:%m/%d} 일정을 지웠는지 확인하지 못했어요: "
-                                + (" / ".join(dlg.since(m)) or "응답 없음"))
-            kept = info["n"] - info["free"]
-            log(f"  기존 일정 삭제: {ic} {d:%m/%d} {info['free']}개" + (f" (실적 있는 {kept}개는 남김)" if kept else ""))
-            total += info["free"]
+            key = f"{d:%Y%m%d}"
+            done = [p for p in read_plans(page) if p["date"] == key and p["result"]]  # [X]로도 안 지워지는 실적 있는 일정
+            if info["free"]:
+                m = dlg.mark()
+                page.evaluate("(a) => IcPlanDelete(a.w, a.i)", {"w": info["weekly"], "i": info["idx"]})
+                if not dlg.wait_for(m, "정상적으로 처리되었습니다", timeout=60):
+                    raise WorkError(f"{ic} 선생님 {d:%m/%d} 일정을 지웠는지 확인하지 못했어요: "
+                                    + (" / ".join(dlg.since(m)) or "응답 없음"))
+                log(f"  기존 일정 삭제: {ic} {d:%m/%d} {info['free']}개")
+                total += info["free"]
+            for p in done:
+                log(f"  [실적 있음] {ic} · {p['person']} {d:%m/%d} {hhmm(p['from'])}~{hhmm(p['to'])} "
+                    f"— 실적이 있어서 지우지 않았어요")
     close_layer(page)
     return total
 
