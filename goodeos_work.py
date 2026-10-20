@@ -20,6 +20,19 @@ SERVICES = {
     "인지": {"code": "34202", "dtl_name": "인지활동 프로그램", "svc_time": "20", "di_gbn": "D"},
     "청소": {"code": "43202", "dtl_name": "청소관리", "svc_time": "30", "di_gbn": "D"},
     "외출": {"code": "41101", "dtl_name": "외출동행", "svc_time": "30", "di_gbn": "D"},
+    # 아래는 goodeos 서비스 찾기 창(../acct/suga_search.php)의 값 그대로 (어르신 서비스. 연계·회의·교육·기관업무는 사람 처리)
+    "정보제공": {"code": "18701", "dtl_name": "사회·재난대응+보건·복지+기타생활", "svc_time": "140", "di_gbn": "D"},
+    "평생교육": {"code": "23101", "dtl_name": "평생교육활동", "svc_time": "60", "di_gbn": "D"},
+    "사회관계": {"code": "23202", "dtl_name": "사회관계활동", "svc_time": "0", "di_gbn": "D"},
+    "여가문화": {"code": "23303", "dtl_name": "여가문화활동", "svc_time": "0", "di_gbn": "D"},
+    "기타사회참여": {"code": "23404", "dtl_name": "기타사회참여활동", "svc_time": "0", "di_gbn": "D"},
+    "자조모임": {"code": "24101", "dtl_name": "자조모임", "svc_time": "60", "di_gbn": "D"},
+    "영양교육": {"code": "33101", "dtl_name": "영양교육 프로그램", "svc_time": "20", "di_gbn": "D"},
+    "보건교육": {"code": "33202", "dtl_name": "보건교육 프로그램", "svc_time": "20", "di_gbn": "D"},
+    "건강교육": {"code": "33303", "dtl_name": "건강교육 프로그램", "svc_time": "20", "di_gbn": "D"},
+    "우울예방": {"code": "34101", "dtl_name": "우울예방 프로그램", "svc_time": "20", "di_gbn": "D"},
+    "식사": {"code": "43101", "dtl_name": "식사관리", "svc_time": "30", "di_gbn": "D"},
+    "상담": {"code": "A1101", "dtl_name": "개별상담·프로그램", "svc_time": "0", "di_gbn": "D"},
 }
 CODE_TO_KIND = {v["code"]: k for k, v in SERVICES.items()}
 

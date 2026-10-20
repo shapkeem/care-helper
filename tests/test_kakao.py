@@ -246,3 +246,19 @@ def test_ignored_single_gets_visible_row(ip):
     [x] = out[1:]
     assert (x.person, x.frm, x.to, x.status) == ("장귀현", "1400", "", "사람 처리")
     assert "시간을 범위로 적어 주세요" in x.note
+
+
+def test_all_elder_services_recognized():
+    import goodeos_work as g
+    assert set(kakao.KINDS.values()) <= set(g.SERVICES)
+    assert all(g.SERVICES[k]["code"] == c for c, k in kakao.CODE_KINDS.items())
+    assert [k for _, k in kakao.find_kinds("보건교육 1000-1020")] == ["보건교육"]
+    assert [k for _, k in kakao.find_kinds("33202 실적")] == ["보건교육"]
+    assert [k for _, k in kakao.find_kinds("직무교육 참석")] == ["!교육"]  # 회의·교육은 여전히 사람 처리
+    assert [k for _, k in kakao.find_kinds("우양재단 식사 지원")] == ["!식사"]
+
+
+def test_health_edu_item(ip):
+    [it] = run(ip, "이미화\n장귀현 어르신 어제 1000-1020 보건교육 실적 부탁드립니다")
+    assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == \
+        ("장귀현", "1000", "1020", "보건교육", "실적", "대기")

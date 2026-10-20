@@ -12,12 +12,18 @@ import jev
 
 CONF_OK = 0.7  # 이보다 확신이 낮으면 사람에게 묻는다
 
-KINDS = {  # 카톡 낱말 → 서비스 (goodeos_work.SERVICES 키)
+KINDS = {  # 카톡 낱말 → 서비스 (goodeos_work.SERVICES 키). 긴 낱말을 먼저 본다
     "전화": "전화", "방문": "방문", "인지": "인지", "청소": "청소", "외출": "외출",
+    "정보제공": "정보제공", "평생교육": "평생교육", "사회관계": "사회관계", "여가문화": "여가문화",
+    "기타사회참여": "기타사회참여", "자조모임": "자조모임", "영양교육": "영양교육", "보건교육": "보건교육",
+    "건강교육": "건강교육", "우울예방": "우울예방", "식사관리": "식사", "개별상담": "상담", "사례관리": "상담",
 }
 EXCLUDED = ["병원동행", "식사", "반찬", "자원연계", "생활용품", "식료품", "사탕", "교육", "회의", "단체", "건강",
             "기관업무"]
-CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": "청소", "41101": "외출"}
+CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": "청소", "41101": "외출",
+              "18701": "정보제공", "23101": "평생교육", "23202": "사회관계", "23303": "여가문화",
+              "23404": "기타사회참여", "24101": "자조모임", "33101": "영양교육", "33202": "보건교육",
+              "33303": "건강교육", "34101": "우울예방", "43101": "식사", "A1101": "상담"}
 
 # 요청 낱말 → 요청 종류. 그 줄 뒤에 처음 나오는 낱말로 정한다 (앞의 것이 먼저 맞으면 뒤의 것은 보지 않음)
 ACTION_WORDS = [
@@ -309,16 +315,18 @@ def find_dates(text, msg_date):
 
 
 def find_kinds(text):
-    """→ [(위치, 서비스 또는 '!제외낱말')]"""
-    out = []
+    """→ [(위치, 서비스 또는 '!제외낱말')]. '보건교육'처럼 서비스 이름 안의 '교육'은 제외 낱말로 보지 않는다."""
+    out, spans = [], []
+    for w in sorted(KINDS, key=len, reverse=True):
+        for m in re.finditer(w, text):
+            if not any(s <= m.start() < e for s, e in spans):
+                out.append((m.start(), KINDS[w]))
+                spans.append((m.start(), m.end()))
     for w in EXCLUDED:
         for m in re.finditer(w, text):
-            out.append((m.start(), "!" + w))
-    for w, k in KINDS.items():
-        for m in re.finditer(w, text):
-            if not any(p <= m.start() < p + len(x) for p, x in out if x.startswith("!")):
-                out.append((m.start(), k))
-    for m in re.finditer(r"(?<![\dA-Za-z])(\d{5}|1A102)(?![\dA-Za-z])", text):  # 서비스 코드로 적은 경우
+            if not any(s < m.end() and m.start() < e for s, e in spans):
+                out.append((m.start(), "!" + w))
+    for m in re.finditer(r"(?<![\dA-Za-z])(\d{5}|1A102|A1101)(?![\dA-Za-z])", text):  # 서비스 코드로 적은 경우
         out.append((m.start(), CODE_KINDS.get(m.group(1), "!코드 " + m.group(1))))
     return sorted(out)
 
