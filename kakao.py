@@ -418,24 +418,16 @@ class Interpreter:
     def clients_of(self, ic):
         return [r for r in self.roster if r.get("생활지원사") == ic]
 
-    def guess_ic(self, body):
-        """보낸 사람을 모를 때: 글에 나온 어르신들의 담당 지원사가 한 명이면 그 사람."""
-        live = [r for r in self.roster if r.get("이용상태") not in STATUS_BLOCK]
-        found, _, _ = find_names(body, [r["성명"] for r in live])
-        ics = {r["생활지원사"] for _, n in found for r in live if r["성명"] == n and r.get("생활지원사")}
-        return next(iter(ics)) if len(ics) == 1 else None
-
     def ask(self, question, options):
         """사람에게 묻고 자유 답변을 Jev 로 보기 중 하나로 맞춘다."""
         return self.ask_user(question, options)
 
     # ---- 메시지 하나 → 항목들
     def interpret(self, sender, msg_date, body):
-        if sender:
-            ic = self.resolve_ic(sender)
-        else:
-            ic = self.guess_ic(body) or self.ask("이 요청은 어느 생활지원사 거예요?\n\n" + body[:200],
-                                                 {c: None for c in self.ics})
+        if not sender:  # 대직이 있어서 담당 지원사로 짐작하지 않는다
+            return [Item(ic="?", source=body, action="기타", status="사람 처리",
+                         note="보낸 지원사 이름이 없어요. 맨 위 줄에 지원사 이름을 적어 주세요")]
+        ic = self.resolve_ic(sender)
         if not ic:
             return [Item(ic="?", source=body, action="기타", status="사람 처리", note="지원사를 모름")]
         if not find_action_words(body) and not REQUEST_RE.search(body):  # '~댁으로 이동합니다' 같은 알림

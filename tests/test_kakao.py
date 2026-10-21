@@ -103,8 +103,14 @@ def test_casual_visit(ip):
         ("이미화", "장귀현", date(2026, 10, 18), "1430", "1500", "방문", "실적")
 
 
-def test_no_sender_phone_fills_end(ip):
+def test_no_sender_not_guessed(ip):
+    # 대직이 있어서 담당 지원사로 짐작하지 않는다
     [it] = run(ip, "형순덕님 18일 전화 1시 빠졌어요")
+    assert it.status == "사람 처리" and "지원사" in it.note
+
+
+def test_phone_fills_end(ip):
+    [it] = run(ip, "박미해\n형순덕님 18일 전화 1시 빠졌어요")
     assert (it.ic, it.person, it.date, it.frm, it.to, it.kind, it.action) == \
         ("박미해", "형순덕", date(2026, 10, 18), "1300", "1301", "전화", "일정등록")
 
@@ -158,7 +164,8 @@ def test_weak_delete_words_yield(ip):
 
 
 def test_modify_single_time_goes_to_person(ip):
-    for text in ("형순덕 어르신 2시에 병원 가셔서 전화 4시로 변경 부탁드려요",
+    for text in ("박미해
+형순덕 어르신 2시에 병원 가셔서 전화 4시로 변경 부탁드려요",
                  "이미화\n장귀현 어르신 10시 방문 11시로 옮겨주세요"):
         out = run(ip, text)
         assert out, text
@@ -201,8 +208,7 @@ def test_first_line_not_sender_unless_worker(ip):
     msgs = kakao.split_messages(text, MON, ["이미화", "박미해"])
     assert [(s, b) for s, _, b in msgs] == [("", text)]
     [it] = run(ip, text)
-    assert (it.ic, it.person, it.date, it.frm, it.to, it.kind, it.action, it.status) == \
-        ("이미화", "장귀현", date(2026, 10, 18), "1430", "1500", "방문", "실적", "대기")
+    assert it.status == "사람 처리"  # 보낸 지원사가 없으면 처리하지 않는다
 
 
 def test_end_past_midnight_goes_to_person(monkeypatch):
