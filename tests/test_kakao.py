@@ -164,8 +164,7 @@ def test_weak_delete_words_yield(ip):
 
 
 def test_modify_single_time_goes_to_person(ip):
-    for text in ("박미해
-형순덕 어르신 2시에 병원 가셔서 전화 4시로 변경 부탁드려요",
+    for text in ("박미해\n형순덕 어르신 2시에 병원 가셔서 전화 4시로 변경 부탁드려요",
                  "이미화\n장귀현 어르신 10시 방문 11시로 옮겨주세요"):
         out = run(ip, text)
         assert out, text
