@@ -10,6 +10,7 @@ Jev(TypeSafe) 사용은 기관 결재·정부 승인·TypeSafe 협약을 마친 
 """
 import os
 import queue
+import re
 import threading
 from datetime import date, datetime
 
@@ -153,6 +154,26 @@ def fetch_daily_lists(app, log):
         app.schedule_chrome_close()
 
 
+def write_upload_excel(items, roster, workers, now, path):
+    """kakao.Item 들 → 일정실적업로드 양식(plan_converter.STANDARD_HEADERS) 엑셀.
+    지난 시간의 실적·일정등록은 실적 시간도 같이 넣는다 (일정과 실적을 한 번에 등록)."""
+    import openpyxl
+    import plan_converter as pc
+    wb = openpyxl.Workbook()
+    ws = wb.active
+    ws.append(pc.STANDARD_HEADERS)
+    for it in items:
+        r = next((x for x in roster if x["성명"] == it.person and x.get("이용상태") not in kakao.STATUS_BLOCK), {})
+        w = workers[it.ic]
+        done = g.is_past(it.date, it.to, now)
+        ws.append([int(f"{it.date:%Y%m%d}"), it.frm, it.to, it.frm if done else None, it.to if done else None,
+                   it.person, int(re.sub(r"\D", "", r.get("생년월일", "")) or 0) or None, r.get("성별") or None,
+                   it.ic, w.get("birth"), w.get("gender") or pc.DEFAULT_WORKER_GENDER,
+                   g.SERVICES[it.kind]["code"] if it.kind in g.SERVICES else None,
+                   pc.DEFAULT_VENDOR_CODE])  # 연계서비스가 아니면 당기관 거래처코드 (변환기와 같음)
+    wb.save(path)
+
+
 class KakaoJob:
     def __init__(self, app, busy, status, row, log, question):
         jev.KEY_LOADER = app.load_jev_key
@@ -278,6 +299,50 @@ class KakaoJob:
         with ThreadPoolExecutor(max_workers=3) as ex:
             list(ex.map(run_group, groups.values()))
 
+    def _upload_substitutes(self, page, subs, roster, now, today):
+        """대직 일정은 지원사별 일정 창에 그 어르신이 없어서, 일정실적업로드 양식 엑셀로 만들어 올린다.
+        (등록 전에 그날 일정을 지우는 기능은 쓰지 않는다: 대직자의 다른 일정이 지워지면 안 되니까)"""
+        import tempfile
+        workers = load_workers(self.app, page, today, self.log)
+        ok = []
+        for it in subs:
+            it.status = "처리 중"
+            self._set_row(it)
+            if it.ic not in workers:
+                it.status, it.note = "확인 필요", f"생활지원사 명단에 '{it.ic}' 선생님이 없어요"
+                self._set_row(it)
+                continue
+            if it.kind not in g.SERVICES:
+                try:
+                    it.kind = runner.ask_kind(self.ask_user, it)
+                except g.WorkError:
+                    it.status, it.note = "건너뜀", ""
+                    self._set_row(it)
+                    continue
+            ok.append(it)
+        if not ok:
+            return
+        self.log(f"▶ 대직 일정 {len(ok)}건을 일정실적업로드 양식으로 올려요")
+        with tempfile.TemporaryDirectory(prefix="care_helper_") as tmp:
+            path = os.path.join(tmp, "대직 일정.xlsx")
+            write_upload_excel(ok, roster, workers, now(), path)
+            try:
+                res = g.upload_plan_excel(page, g.Dialogs(page), path, self.log, clear=False)
+            except Exception as e:
+                for it in ok:
+                    it.status, it.note = "확인 필요", str(e)[:200]
+                    self._set_row(it)
+                return
+        for it in ok:
+            err = next((e for e in res["errors"] if it.person in e), None)
+            if err:
+                it.status, it.note = "확인 필요", err
+            elif res["saved"]:
+                it.status, it.note = "완료", "대직: 일정실적업로드로 등록"
+            else:
+                it.status, it.note = "확인 필요", "등록되지 않았어요"
+            self._set_row(it)
+
     def _work(self, text):
         from playwright.sync_api import sync_playwright
         app = self.app
@@ -303,7 +368,10 @@ class KakaoJob:
                         items.append(it)
                         self._set_row(it)
                 todo = [it for it in items if it.status == "대기"]
-                self._run_parallel(todo, now)
+                subs = [it for it in todo if it.substitute]
+                self._run_parallel([it for it in todo if not it.substitute], now)
+                if subs and not self.stopping:
+                    self._upload_substitutes(page, subs, roster, now, today)
                 done = sum(it.status == "완료" for it in items)
                 head = "멈춤" if self.stopping else "끝"
                 self._status(f"{head} · 완료 {done}건 / 전체 {len(items)}건")

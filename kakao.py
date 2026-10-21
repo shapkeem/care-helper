@@ -86,6 +86,7 @@ class Item:
     status: str = "대기"
     log: list = field(default_factory=list)
     requested_kinds: set = field(default_factory=set)  # 같은 메시지에서 같은 어르신·같은 날 요청된 서비스들
+    substitute: bool = False  # 대직: 보낸 지원사가 이 어르신 담당이 아님 → 일정실적업로드 엑셀로 올린다
 
     def label(self):
         t = ""
@@ -93,7 +94,8 @@ class Item:
             t = f"{self.frm[:2]}:{self.frm[2:]}~" + (f"{self.to[:2]}:{self.to[2:]}" if self.to else "?")
         who = f"{self.old_person}→{self.person}" if self.old_person else self.person
         d = f"{self.date:%m/%d}" if self.date else "날짜?"
-        return f"{self.ic} · {who or '?'} · {d} {t or '시간없음'} {self.kind or ''} · {self.action or '?'}"
+        sub = " (대직)" if self.substitute else ""
+        return f"{self.ic}{sub} · {who or '?'} · {d} {t or '시간없음'} {self.kind or ''} · {self.action or '?'}"
 
 
 # ---------------------------------------------------------------- 메시지 나누기
@@ -443,7 +445,18 @@ class Interpreter:
         rows = self.clients_of(ic)
         clients = [r["성명"] for r in rows]
         found, unknown, ambiguous = find_names(body, clients)
-        names = list(found)
+        # 대직: 다른 지원사 담당 어르신 이름이 그대로 적혀 있으면 보낸 지원사(대직자) 일정으로 처리한다
+        mine = set(clients)
+        owners = {}
+        for r in self.roster:
+            if r.get("생활지원사") and r.get("생활지원사") != ic and r.get("이용상태") not in STATUS_BLOCK                     and r["성명"] not in mine:
+                owners.setdefault(r["성명"], set()).add(r["생활지원사"])
+        taken = [(p, p + len(n)) for p, n in found] + [(p, p + len(b)) for p, b, _ in ambiguous]
+        sub_found, _, _ = find_names(body, [n for n, o in owners.items() if len(o) == 1])
+        sub_found = [(p, n) for p, n in sub_found if not any(a <= p < b for a, b in taken)]
+        sub_names = {n for _, n in sub_found}
+        unknown = [(p, w) for p, w in unknown if w not in owners]  # 다른 지원사 어르신을 오타로 보고 엉뚱하게 맞추지 않게
+        names = list(found) + sub_found
         for pos, b, cands in ambiguous:
             pick = self.ask(f"[{ic}] '{b}' 어르신이 {len(cands)}분이에요. 누구예요?\n\n{body[:200]}",
                             {c: self._client_desc(c, rows) for c in cands})
@@ -459,19 +472,6 @@ class Interpreter:
                 pick = self.match_unknown(ic, w, body, rows)
                 if pick:
                     names.append((pos, pick))
-        if not names:  # 다른 지원사 담당 어르신 이름이 그대로 적혀 있는 경우
-            for pos, w in loose_words(body):
-                other = [r for r in self.roster if r["성명"] == w and r.get("생활지원사") != ic
-                         and r.get("이용상태") not in STATUS_BLOCK]
-                if len(other) == 1:
-                    o = other[0]["생활지원사"]
-                    yes = f"{o} 선생님 일정으로 처리"
-                    pick = self.ask(f"'{w}' 어르신은 {ic} 선생님이 아니라 {o} 선생님 담당이에요. 어떻게 할까요?\n\n"
-                                    f"{body[:200]}", {yes: None, "건너뛰기": "처리하지 않음"})
-                    if pick == yes:
-                        ic, rows = o, self.clients_of(o)
-                        names.append((pos, w))
-                    break
         if not names and times:
             pick = self.ask(f"[{ic}] 누구 일정인지 모르겠어요. 어느 어르신이에요?\n\n{body[:200]}",
                             {r["성명"]: self._client_desc(r["성명"], rows) for r in rows
@@ -556,6 +556,11 @@ class Interpreter:
                 it.status, it.note = "요청 아님", "일정/실적 요청이 아닌 것 같아요"
             elif it.action == "수정" and not it.frm:
                 it.status, it.note = "사람 처리", "시간이 없어서 어떻게 바꿀지 사람이 봐야 해요"
+        for it in items:
+            if it.person in sub_names:
+                it.substitute = True
+                if it.status == "대기" and it.action not in ("실적", "일정등록"):
+                    it.status, it.note = "사람 처리", "대직 일정의 수정·삭제는 사람이 해 주세요"
         return items
 
     @staticmethod

@@ -262,3 +262,32 @@ def test_health_edu_item(ip):
     [it] = run(ip, "이미화\n장귀현 어르신 어제 1000-1020 보건교육 실적 부탁드립니다")
     assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == \
         ("장귀현", "1000", "1020", "보건교육", "실적", "대기")
+
+
+def test_substitute_worker(ip):
+    # 이미화 선생님이 박미해 선생님 담당 형순덕 어르신 일을 대직으로 보냄 → 이미화(대직자) 일정, 묻지 않음
+    [it] = run(ip, "이미화\n형순덕 어르신 어제 1000-1030 방문 실적 부탁드립니다")
+    assert (it.ic, it.person, it.substitute, it.action, it.status) == ("이미화", "형순덕", True, "실적", "대기")
+    [own] = run(ip, "박미해\n형순덕 어르신 어제 1000-1030 방문 실적 부탁드립니다")
+    assert (own.ic, own.substitute) == ("박미해", False)
+    [mod] = run(ip, "이미화\n형순덕 어르신 어제 1000-1030 방문 수정 부탁드립니다")
+    assert mod.status == "사람 처리"  # 대직 일정 수정·삭제는 사람이
+
+
+def test_write_upload_excel(tmp_path):
+    import openpyxl
+    from datetime import datetime
+    import kakao_job
+    import plan_converter as pc
+    it = kakao.Item(ic="이미화", person="형순덕", date=date(2026, 10, 18), frm="1000", to="1030", kind="방문",
+                    action="실적", substitute=True)
+    fut = kakao.Item(ic="이미화", person="형순덕", date=date(2026, 10, 25), frm="1400", to="1401", kind="전화",
+                     action="일정등록", substitute=True)
+    path = tmp_path / "x.xlsx"
+    kakao_job.write_upload_excel([it, fut], ROSTER, {"이미화": {"birth": 19650506, "gender": ""}},
+                                 datetime(2026, 10, 19, 9, 0), str(path))
+    rows = list(openpyxl.load_workbook(path).active.iter_rows(values_only=True))
+    assert list(rows[0]) == pc.STANDARD_HEADERS
+    assert list(rows[1]) == [20261018, "1000", "1030", "1000", "1030", "형순덕", 19420202, None,
+                             "이미화", 19650506, "여", "1A102", "0002"]
+    assert rows[2][3:5] == (None, None)  # 미래 일정은 실적 칸을 비운다
