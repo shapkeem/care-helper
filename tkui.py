@@ -174,6 +174,45 @@ class RoundPanel(tk.Canvas):
         self.itemconfigure(self._win, width=w - self._padx * 2)
 
 
+class RoundCheck(tk.Canvas):
+    """둥근 체크박스 (기본 체크박스는 네모난 옛날 모양이라 직접 그린다). 켜면 파란 칸에 흰 체크.
+    variable: tk.BooleanVar, text 를 주면 오른쪽에 글자도 그리고 글자를 눌러도 켜고 끈다."""
+    S = 18
+
+    def __init__(self, master, variable, command=None, text="", font=None, bg=C_BG):
+        self._font = font or tkfont.Font(family=FONT, size=9)
+        w = self.S + 4 + (self._font.measure(text) + 8 if text else 0)
+        super().__init__(master, width=w, height=self.S + 4, bg=bg, highlightthickness=0, bd=0, cursor="hand2")
+        self.var, self._cmd, self._text = variable, command, text
+        self._hover = False
+        self.bind("<ButtonRelease-1>", self._toggle)
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+        variable.trace_add("write", lambda *a: self._draw())
+        self._draw()
+
+    def _set_hover(self, v):
+        self._hover = v
+        self._draw()
+
+    def _toggle(self, _e=None):
+        self.var.set(not self.var.get())
+        if self._cmd:
+            self._cmd()
+
+    def _draw(self):
+        self.delete("all")
+        on, s, o = bool(self.var.get()), self.S, 2
+        fill = (C_PRIMARY_H if self._hover else C_PRIMARY) if on else "#FFFFFF"
+        line = fill if on else ("#94A3B8" if self._hover else "#CBD5E1")
+        self.create_polygon(_round_points(o, o, o + s, o + s, 5), smooth=True, fill=fill, outline=line, width=1.5)
+        if on:
+            self.create_line(o + 4.5, o + 9.5, o + 7.5, o + 12.5, o + 13.5, o + 5.5, fill="#FFFFFF", width=2.2,
+                             capstyle="round", joinstyle="round")
+        if self._text:
+            self.create_text(o + s + 8, o + s / 2, text=self._text, anchor="w", font=self._font, fill=C_TEXT)
+
+
 class CellField(tk.Canvas):
     """확인 표의 둥근 칸. choices 가 있으면 ▾ 를 눌러(또는 글자를 치면) 목록에서 고른다.
     .get() / .set() 으로 값을 다루고, warn(True) 면 노란 칸."""
@@ -775,8 +814,7 @@ class TkUI:
         self.k_grid(line)
         var = tk.BooleanVar(value=r["checked"])
         w = {}
-        tk.Checkbutton(line, variable=var, bg=C_BG, activebackground=C_BG,
-                       command=lambda: self.k_changed(r["id"])).grid(row=0, column=0)
+        RoundCheck(line, var, command=lambda: self.k_changed(r["id"])).grid(row=0, column=0)
         values = {"ic": m["ics"], "kind": m["kinds"], "action": m["actions"]}
         for i, (key, _t, _w, kind) in enumerate(self.K_COLS):
             if kind in ("combo", "entry"):
@@ -1036,7 +1074,7 @@ class TkUI:
             self.rv["on"][q["pid"]] = var
             line = tk.Frame(self.rv_list, bg=C_BG, padx=6, pady=3)
             line.pack(fill="x")
-            tk.Checkbutton(line, variable=var, bg=C_BG, command=self.rv_count_update).pack(side="left")
+            RoundCheck(line, var, command=self.rv_count_update).pack(side="left", padx=(0, 6))
             self.badge(line, q["kind"], "run").pack(side="left", padx=(0, 6))
             self.label(line, f"{q['row']}행 {q['person']}", 9, width=14).pack(side="left")
             self.label(line, q["current"], 9, fg=C_MUTED, width=14).pack(side="left")
@@ -1190,8 +1228,8 @@ class TkUI:
         self.st_hint = self.label(form, "", 8, fg=C_MUTED)
         self.st_hint.pack(anchor="w")
         self.st_hide = tk.BooleanVar()
-        tk.Checkbutton(form, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)", variable=self.st_hide, font=self.F(9),
-                       bg=C_BG, activebackground=C_BG, selectcolor=C_BG, anchor="w").pack(anchor="w", pady=(4, 0))
+        RoundCheck(form, self.st_hide, text="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)",
+                   font=self.F(9)).pack(anchor="w", pady=(4, 0))
         btns = tk.Frame(p, bg=C_BG)
         btns.pack(anchor="w", pady=(14, 0))
         self.button(btns, "저장", self.st_save, primary=True).pack(side="left")
