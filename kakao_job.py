@@ -174,11 +174,71 @@ def write_upload_excel(items, roster, workers, now, path):
     wb.save(path)
 
 
+ACTIONS_RUN = ("실적", "일정등록", "수정", "삭제")
+FILL_NOTES = ("범위", "끝나는 시간", "시간을 알아보지")  # 시간만 채우면 되는 '사람 처리' → 표에서 노란 칸으로
+
+
+def item_to_row(it):
+    """kakao.Item → 확인 표 한 줄 (화면에서 고칠 수 있는 값)."""
+    t = f"{it.frm}~{it.to}" if it.frm and it.to else (f"{it.frm}~" if it.frm else "")
+    fill = it.status == "사람 처리" and any(k in (it.note or "") for k in FILL_NOTES)
+    ok = it.status == "대기" or fill
+    return {"id": it._id, "ic": it.ic if it.ic != "?" else "", "person": it.person,
+            "date": f"{it.date:%m/%d}" if it.date else "", "time": t,
+            "kind": it.kind if it.kind in g.SERVICES else "",
+            "action": it.action if it.action in ACTIONS_RUN else "",
+            "source": " ".join((it.source or "").split())[:80],
+            "checked": ok, "status": "" if ok else it.status, "note": "" if ok else (it.note or "")}
+
+
+def parse_md(text, today):
+    m = re.fullmatch(r"\s*(\d{1,2})\s*[/.\-]\s*(\d{1,2})\s*", text or "")
+    if not m or not 1 <= int(m.group(1)) <= 12:
+        return None
+    return kakao.resolve_day(int(m.group(1)), int(m.group(2)), today)
+
+
+def parse_range(text):
+    m = re.fullmatch(r"\s*(\d{1,2}):?(\d{2})\s*[~\-]\s*(\d{1,2}):?(\d{2})\s*", text or "")
+    if not m:
+        return None
+    a, b = kakao._hm(m.group(1), m.group(2)), kakao._hm(m.group(3), m.group(4))
+    return (a, b) if a and b and a < b else None
+
+
+def row_problems(row, ics, names, today):
+    """확인 표 한 줄에서 고쳐야 할 칸 이름들."""
+    bad = set()
+    if row.get("ic") not in ics:
+        bad.add("ic")
+    if row.get("person") not in names:
+        bad.add("person")
+    if not parse_md(row.get("date"), today):
+        bad.add("date")
+    if not parse_range(row.get("time")) and not (row.get("action") in ("실적", "삭제") and not row.get("time")):
+        bad.add("time")  # 실적·삭제는 시간을 비우면 그날 일정에서 찾는다
+    if row.get("kind") not in g.SERVICES:
+        bad.add("kind")
+    if row.get("action") not in ACTIONS_RUN:
+        bad.add("action")
+    return bad
+
+
+def row_to_item(row, roster, today):
+    """고친 표 한 줄 → 처리할 kakao.Item. 보낸 지원사 담당이 아닌 어르신이면 대직."""
+    frm, to = parse_range(row["time"]) or ("", "")
+    mine = any(r["성명"] == row["person"] and r.get("생활지원사") == row["ic"] for r in roster)
+    it = kakao.Item(ic=row["ic"], person=row["person"], date=parse_md(row["date"], today), frm=frm, to=to,
+                    kind=row["kind"], action=row["action"], source=row.get("source", ""), substitute=not mine)
+    it._id = row["id"]
+    return it
+
+
 class KakaoJob:
-    def __init__(self, app, busy, status, row, log, question):
+    def __init__(self, app, busy, status, row, log, question, rows=lambda d: None):
         jev.KEY_LOADER = app.load_jev_key
         self.app, self.busy = app, busy
-        self._status, self._row, self._log, self._question = status, row, log, question
+        self._status, self._row, self._log, self._question, self._rows = status, row, log, question, rows
         self.running = False
         self.stopping = False
         self.answers = queue.Queue()
@@ -188,19 +248,36 @@ class KakaoJob:
 
     # ---- 화면에서 부르는 것
     def start(self, text):
-        """시작하면 None, 시작할 수 없으면 이유(글)를 돌려준다."""
-        if self.running:
-            return "앞 작업이 아직 진행 중이에요. 질문에 답하거나 '멈춤'을 눌러 주세요."
-        if self.busy["v"]:
+        """[읽기]: 카톡을 읽어 확인 표를 만든다 (질문하지 않음). 시작하면 None, 못 하면 이유."""
+        if self.running or self.busy["v"]:
             return "카톡 요청 처리가 이미 진행 중이에요."
         text = (text or "").strip()
         if not text:
             return "카톡 내용을 먼저 붙여넣어 주세요."
+        self.running, self.stopping = True, False
+        self.busy["v"] = True
+        threading.Thread(target=self._read, args=(text,), daemon=True).start()
+        return None
+
+    def run(self, rows):
+        """[실행]: 확인 표에서 체크한 줄을 표에 적힌 그대로 처리한다. 시작하면 None, 못 하면 이유."""
+        if self.running or self.busy["v"]:
+            return "카톡 요청 처리가 이미 진행 중이에요."
+        ctx = getattr(self, "_ctx", None)
+        if not ctx:
+            return "먼저 [읽기]를 눌러 주세요."
+        names = {r["성명"] for r in ctx["roster"] if r.get("이용상태") not in kakao.STATUS_BLOCK}
+        rows = [r for r in rows if r.get("checked")]
+        if not rows:
+            return "실행할 줄을 체크해 주세요."
+        if any(row_problems(r, set(ctx["ics"]), names, ctx["today"]) for r in rows):
+            return "노란 칸을 먼저 채워 주세요."
         while not self.answers.empty():  # 지난 작업에서 남은 답 비우기
             self.answers.get_nowait()
         self.running, self.stopping = True, False
         self.busy["v"] = True
-        threading.Thread(target=self._work, args=(text,), daemon=True).start()
+        items = [row_to_item(r, ctx["roster"], ctx["today"]) for r in rows]
+        threading.Thread(target=self._execute, args=(items,), daemon=True).start()
         return None
 
     def answer(self, value):
@@ -343,7 +420,7 @@ class KakaoJob:
                 it.status, it.note = "확인 필요", "등록되지 않았어요"
             self._set_row(it)
 
-    def _work(self, text):
+    def _read(self, text):
         from playwright.sync_api import sync_playwright
         app = self.app
         try:
@@ -354,27 +431,55 @@ class KakaoJob:
                 self._status("goodeos 연결 중...")
                 page = app.get_page(pw)
                 offset = g.server_offset(page)  # '오늘'과 지난 시간 판단은 PC 시계 말고 goodeos 서버 시각으로
-                now = lambda: datetime.now() + offset
-                today = now().date()
+                today = (datetime.now() + offset).date()
                 roster = load_roster(app, page, today, self.log)
-                ip = kakao.Interpreter(roster, self.ask_user, today)
-                msgs = kakao.split_messages(text, today, ip.ics)
-                items = []
-                for i, (sender, d, body) in enumerate(msgs, 1):
-                    if self.stopping:
-                        break
-                    self._status(f"해석 중... ({i}/{len(msgs)})")
-                    for it in ip.interpret(sender, d, body):
-                        items.append(it)
-                        self._set_row(it)
-                todo = [it for it in items if it.status == "대기"]
-                subs = [it for it in todo if it.substitute]
-                self._run_parallel([it for it in todo if not it.substitute], now)
+            ip = kakao.Interpreter(roster, lambda q, o: None, today)  # 묻지 않는다: 모르는 칸은 표에서 채운다
+            msgs = kakao.split_messages(text, today, ip.ics)
+            items = []
+            for i, (sender, d, body) in enumerate(msgs, 1):
+                self._status(f"읽는 중... ({i}/{len(msgs)})")
+                for it in ip.interpret(sender, d, body):
+                    self._next_id += 1
+                    it._id = self._next_id
+                    items.append(it)
+            live = [r for r in roster if r.get("이용상태") not in kakao.STATUS_BLOCK]
+            clients = {}
+            for r in live:
+                clients.setdefault(r.get("생활지원사") or "", []).append(r["성명"])
+            self._ctx = {"roster": roster, "today": today, "offset": offset, "ics": ip.ics}
+            rows = [item_to_row(it) for it in items]
+            self._rows({"rows": rows, "ics": ip.ics, "clients": clients, "names": sorted({r["성명"] for r in live}),
+                        "kinds": list(g.SERVICES), "actions": list(ACTIONS_RUN), "today": today.isoformat()})
+            n = sum(r["checked"] for r in rows)
+            self._status(f"요청 {len(rows)}건을 읽었어요. 표를 확인하고 [실행]을 눌러 주세요.")
+            self.log(f"읽기 끝: {len(rows)}건 (실행할 줄 {n}건)")
+        except (jev.JevError, g.WorkError, app.NeedLogin) as e:
+            self._status(str(e))
+            self.log(str(e))
+        except Exception as e:
+            self._status(f"문제가 생겼어요: {e}")
+            self.log(f"문제가 생겼어요: {e}")
+        finally:
+            self.running = False
+            self.busy["v"] = False
+            app.schedule_chrome_close()
+
+    def _execute(self, items):
+        from playwright.sync_api import sync_playwright
+        app = self.app
+        ctx = self._ctx
+        now = lambda: datetime.now() + ctx["offset"]
+        try:
+            with sync_playwright() as pw:
+                self._status("goodeos 연결 중...")
+                page = app.get_page(pw)
+                subs = [it for it in items if it.substitute]
+                self._run_parallel([it for it in items if not it.substitute], now)
                 if subs and not self.stopping:
-                    self._upload_substitutes(page, subs, roster, now, today)
-                done = sum(it.status == "완료" for it in items)
-                head = "멈춤" if self.stopping else "끝"
-                self._status(f"{head} · 완료 {done}건 / 전체 {len(items)}건")
+                    self._upload_substitutes(page, subs, ctx["roster"], now, ctx["today"])
+            done = sum(it.status == "완료" for it in items)
+            head = "멈춤" if self.stopping else "끝"
+            self._status(f"{head} · 완료 {done}건 / 실행 {len(items)}건")
         except (jev.JevError, g.WorkError, app.NeedLogin) as e:
             self._status(str(e))
             self.log(str(e))

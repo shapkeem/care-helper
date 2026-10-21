@@ -40,3 +40,19 @@ def test_parallel_by_worker(monkeypatch):
     assert all(it.status == "완료" for it in todo)
     assert peak[0] == 3  # 지원사 4명 중 3명씩 동시에
     assert per_ic["지원사0"] == ["어르신0", "어르신4", "어르신8"]  # 같은 지원사는 받은 순서대로
+
+
+def test_review_rows():
+    from datetime import date
+    today = date(2026, 10, 21)
+    ics, names = {"이미화"}, {"장귀현", "형순덕"}
+    row = {"id": 1, "ic": "이미화", "person": "장귀현", "date": "10/20", "time": "1430~1500", "kind": "방문",
+           "action": "실적", "checked": True}
+    assert kakao_job.row_problems(row, ics, names, today) == set()
+    assert kakao_job.row_problems(dict(row, time=""), ics, names, today) == set()  # 실적은 시간 없어도 됨
+    assert kakao_job.row_problems(dict(row, time="", action="일정등록"), ics, names, today) == {"time"}
+    assert kakao_job.row_problems(dict(row, person="없는분", date="13/40", kind="??"), ics, names, today) ==         {"person", "date", "kind"}
+    roster = [{"성명": "장귀현", "생활지원사": "이미화"}, {"성명": "형순덕", "생활지원사": "박미해"}]
+    it = kakao_job.row_to_item(row, roster, today)
+    assert (it.ic, it.person, it.date, it.frm, it.to, it.substitute) ==         ("이미화", "장귀현", date(2026, 10, 20), "1430", "1500", False)
+    assert kakao_job.row_to_item(dict(row, person="형순덕"), roster, today).substitute is True

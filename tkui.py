@@ -144,6 +144,134 @@ class ThinScrollbar(tk.Canvas):
         self.command("moveto", f0 + (e.y - y0) / max(1, self.winfo_height()))
 
 
+class RoundPanel(tk.Canvas):
+    """모서리가 둥근 알림 줄·카드 (tk.Frame 은 네모라서 캔버스에 그린다). 안에 넣을 것은 .inner 에."""
+
+    def __init__(self, master, fill, outline=None, r=12, padx=12, pady=6, bg=C_BG):
+        super().__init__(master, bg=bg, highlightthickness=0, bd=0, height=10)
+        self._fill, self._line, self._r, self._padx, self._pady = fill, outline or fill, r, padx, pady
+        self.inner = tk.Frame(self, bg=fill)
+        self._win = self.create_window(padx, pady, window=self.inner, anchor="nw")
+        self.inner.bind("<Configure>", lambda e: self._fit(), add="+")
+        self.bind("<Configure>", lambda e: self._fit())
+        self.bind("<Map>", lambda e: self.after_idle(self._fit))
+
+    def _fit(self):
+        # 안쪽이 아직 화면에 안 그려졌어도(높이 1) 필요한 높이(reqheight)로 맞춘다
+        h = self.inner.winfo_reqheight() + self._pady * 2
+        if int(self["height"]) != h:
+            self.configure(height=h)
+        self._draw()
+
+    def _draw(self):
+        w, h = self.winfo_width(), self.winfo_height()
+        if w < 30:
+            return
+        self.delete("box")
+        self.create_polygon(_round_points(1, 1, w - 2, h - 2, self._r), smooth=True, fill=self._fill,
+                            outline=self._line, tags="box")
+        self.tag_lower("box")
+        self.itemconfigure(self._win, width=w - self._padx * 2)
+
+
+class CellField(tk.Canvas):
+    """확인 표의 둥근 칸. choices 가 있으면 ▾ 를 눌러(또는 글자를 치면) 목록에서 고른다.
+    .get() / .set() 으로 값을 다루고, warn(True) 면 노란 칸."""
+    H = 28
+
+    def __init__(self, master, font, choices=None, on_change=None, bg=C_BG):
+        super().__init__(master, height=self.H, width=10, bg=bg, highlightthickness=0, bd=0)
+        self._choices, self._on_change = choices, on_change or (lambda: None)
+        self._warn = self._focus = False
+        self._pop = None
+        self.e = tk.Entry(self, font=font, relief="flat", bd=0, bg="#FFFFFF", highlightthickness=0, width=1)
+        self._win = self.create_window(9, self.H / 2, window=self.e, anchor="w")
+        self.e.bind("<FocusIn>", lambda e: self._set_focus(True), add="+")
+        self.e.bind("<FocusOut>", lambda e: (self._set_focus(False), self.after(150, self._close)), add="+")
+        self.e.bind("<KeyRelease>", self._key, add="+")
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Button-1>", self._click)
+
+    def get(self):
+        return self.e.get().strip()
+
+    def set(self, v):
+        self.e.delete(0, "end")
+        self.e.insert(0, v or "")
+
+    def warn(self, v):
+        if v != self._warn:
+            self._warn = v
+            self._draw()
+
+    def _set_focus(self, v):
+        self._focus = v
+        self._draw()
+
+    def _draw(self):
+        w, h = self.winfo_width(), self.H
+        if w < 20:
+            return
+        fill = "#FEF3C7" if self._warn else "#FFFFFF"
+        line = C_PRIMARY if self._focus else ("#F59E0B" if self._warn else "#CBD5E1")
+        self.delete("box")
+        self.create_polygon(_round_points(1, 1, w - 2, h - 2, 8), smooth=True, fill=fill, outline=line, tags="box")
+        if self._choices is not None:
+            self.create_text(w - 12, h / 2, text="▾", fill=C_MUTED, tags="box")
+        self.tag_lower("box")
+        self.e.configure(bg=fill)
+        self.itemconfigure(self._win, width=w - (30 if self._choices is not None else 18))
+
+    def _click(self, e):
+        if self._choices is not None and e.x > self.winfo_width() - 24:
+            self._open("")
+        else:
+            self.e.focus_set()
+
+    def _key(self, e):
+        if e.keysym in ("Escape",):
+            self._close()
+        elif self._choices is not None and e.keysym not in ("Tab", "Return"):
+            self._open(self.get())
+        self._on_change()
+
+    def _open(self, typed):
+        vals = self._choices() if callable(self._choices) else list(self._choices)
+        if typed:
+            vals = [v for v in vals if typed in v]
+        self._close()
+        if not vals:
+            return
+        top = self._pop = tk.Toplevel(self)
+        top.overrideredirect(True)
+        top.configure(bg="#CBD5E1")
+        lb = tk.Listbox(top, font=self.e.cget("font"), height=min(8, len(vals)), relief="flat", bd=0,
+                        highlightthickness=0, activestyle="none", selectbackground="#DBEAFE",
+                        selectforeground=C_TEXT, exportselection=False)
+        for v in vals:
+            lb.insert("end", v)
+        lb.pack(fill="both", expand=True, padx=1, pady=1)
+        top.geometry(f"{max(self.winfo_width(), 120)}x{min(8, len(vals)) * 22 + 4}"
+                     f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.H}")
+
+        def pick(_e=None):
+            sel = lb.curselection()
+            if sel:
+                self.set(lb.get(sel[0]))
+                self._on_change()
+            self._close()
+        lb.bind("<ButtonRelease-1>", pick)
+        lb.bind("<Return>", pick)
+
+    def _close(self):
+        if self._pop is not None:
+            try:
+                self._pop.destroy()
+            except tk.TclError:
+                pass
+            self._pop = None
+
+
 class RoundField(tk.Canvas):
     """둥근 테두리 입력칸 (기본 Entry 는 검은 사각 테두리라 직접 그린다). 글자는 안쪽 .w(Entry/Text)로 다룬다."""
 
@@ -220,6 +348,7 @@ class TkUI:
         style.configure("Thin.Horizontal.TProgressbar", troughcolor=C_CARD, background=C_PRIMARY,
                         bordercolor=C_CARD, lightcolor=C_PRIMARY, darkcolor=C_PRIMARY, thickness=4)
         self.scrollers = {}  # 마우스 휠로 움직일 캔버스
+        self._wheel_acc = {}  # 캔버스별로 모은 휠 칸 수
         self.pages, self.nav = {}, {}
         self.cur = None
         self._toast = None
@@ -287,8 +416,11 @@ class TkUI:
     def scroll_list(self, parent, height=None):
         """테두리 있는 스크롤 목록. → 안쪽 프레임"""
         wrap = tk.Frame(parent, bg=C_BG, highlightbackground=C_LINE, highlightthickness=1)
-        canvas = tk.Canvas(wrap, bg=C_BG, highlightthickness=0, height=height or 200)
-        sb = ThinScrollbar(wrap, canvas.yview, C_BG)
+        canvas = tk.Canvas(wrap, bg=C_BG, highlightthickness=0, height=height or 200, yscrollincrement=20)
+        def view(*a):  # 스크롤 막대를 끌 때도 움직인 뒤 바로 다시 그린다 (줄 겹침 방지)
+            canvas.yview(*a)
+            canvas.update_idletasks()
+        sb = ThinScrollbar(wrap, view, C_BG)
         canvas.configure(yscrollcommand=sb.set)
         sb.pack(side="right", fill="y", padx=(0, 2), pady=2)
         canvas.pack(side="left", fill="both", expand=True)
@@ -355,11 +487,23 @@ class TkUI:
         w = self.root.winfo_containing(e.x_root, e.y_root)
         while w is not None:
             if str(w) in self.scrollers:
-                w.yview_scroll(int(-e.delta / 120), "units")
+                # 휠을 빠르게 굴리면 이벤트가 몰려 화면이 다 그려지기 전에 또 움직여 줄이 겹쳐 보인다:
+                # 잠깐 모아서 한 번에 움직이고 바로 다시 그린다
+                acc = self._wheel_acc.get(w, 0) - e.delta / 120
+                self._wheel_acc[w] = acc
+                if acc and not getattr(w, "_wheel_job", None):
+                    w._wheel_job = self.root.after(16, lambda c=w: self._wheel_flush(c))
                 return
             if isinstance(w, tk.Text):
                 return
             w = w.master
+
+    def _wheel_flush(self, c):
+        c._wheel_job = None
+        n = int(self._wheel_acc.pop(c, 0))
+        if n:
+            c.yview_scroll(n * 3, "units")  # 한 칸 = 20px, 휠 한 번 = 60px
+            c.update_idletasks()
 
     # ---------------------------------------------------------------- 뼈대
     def build(self):
@@ -547,23 +691,32 @@ class TkUI:
                 self.d_set(None, d["msg"], True)
 
     # ---------------------------------------------------------------- 카톡 요청 처리
+    # 확인 표 칸: (키, 제목, 너비px, 종류)
+    K_COLS = (("chk", "", 28, None), ("ic", "지원사", 88, "combo"), ("sub", "", 44, None),
+              ("person", "어르신", 88, "combo"), ("date", "날짜", 58, "entry"), ("time", "시간", 96, "entry"),
+              ("kind", "서비스", 96, "combo"), ("action", "요청", 82, "combo"), ("status", "상태", 88, None),
+              ("source", "원문", 0, None))
+
     def build_kakao(self):
         p = self.page("kakao")
-        acts, _ = self.head(p, "카톡 요청 처리", "카톡을 아무렇게나 붙여 넣어도 돼요. 애매한 건 물어볼게요.")
-        self.k_start_btn = self.button(acts, "처리 시작", self.k_start, primary=True)
-        self.k_start_btn.pack(side="right")
+        acts, _ = self.head(p, "카톡 요청 처리", "붙여 넣고 [읽기] → 표 확인 → [실행]. 노란 칸만 채우면 돼요.")
+        self.k_run_btn = self.button(acts, "실행", self.k_run, primary=True)
+        self.k_run_btn.pack(side="right")
+        self.k_start_btn = self.button(acts, "읽기", self.k_start)
+        self.k_start_btn.pack(side="right", padx=(0, 6))
         self.button(acts, "멈춤", self.api.kakao_stop).pack(side="right", padx=(0, 6))
-        box = RoundField(p, lines=6)
+        box = RoundField(p, lines=4)
         box.pack(fill="x", pady=(2, 6))
         self.k_text = box.w
         self.k_status = self.label(p, "", 9, fg=C_MUTED)
         self.k_status.pack(fill="x")
-        self.k_q = tk.Frame(p, bg="#EFF6FF", padx=12, pady=10, highlightbackground="#BFDBFE", highlightthickness=1)
-        self.k_qtext = self.label(self.k_q, "", 10, True, bg="#EFF6FF", wraplength=700)
+        self.k_q = RoundPanel(p, "#EFF6FF", "#BFDBFE", padx=14, pady=10)
+        qi = self.k_q.inner
+        self.k_qtext = self.label(qi, "", 10, True, bg="#EFF6FF", wraplength=700)
         self.k_qtext.pack(fill="x")
-        self.k_qopts = tk.Frame(self.k_q, bg="#EFF6FF")
+        self.k_qopts = tk.Frame(qi, bg="#EFF6FF")
         self.k_qopts.pack(fill="x", pady=6)
-        row = tk.Frame(self.k_q, bg="#EFF6FF")
+        row = tk.Frame(qi, bg="#EFF6FF")
         row.pack(fill="x")
         qbox = RoundField(row, bg="#EFF6FF")
         qbox.pack(side="left", fill="x", expand=True)
@@ -571,52 +724,131 @@ class TkUI:
         self.k_qin.bind("<Return>", lambda e: self.k_send())
         self.button(row, "건너뛰기", lambda: self.k_answer(None), small=True).pack(side="right", padx=(6, 0))
         self.button(row, "답하기", self.k_send, primary=True, small=True).pack(side="right", padx=(6, 0))
-        self.k_table_wrap, self.k_table = self.scroll_list(p)
-        hdr = self.k_hdr = tk.Frame(p, bg=C_CARD)
+        hdr = self.k_hdr = tk.Frame(p, bg=C_CARD, padx=6)
         hdr.pack(fill="x", pady=(8, 0))
-        hdr.configure(padx=8)
-        self.label(hdr, "요청", 9, fg=C_MUTED, bg=C_CARD, width=46, pady=4).pack(side="left")
-        hc = tk.Frame(hdr, bg=C_CARD, width=96, height=24)
-        hc.pack_propagate(False)
-        hc.pack(side="left", padx=8)
-        tk.Label(hc, text="상태", font=self.F(9), fg=C_MUTED, bg=C_CARD).place(relx=0.5, rely=0.5, anchor="center")
-        self.label(hdr, "메모", 9, fg=C_MUTED, bg=C_CARD).pack(side="left")
+        self.k_grid(hdr)
+        for i, (key, title, _w, _k) in enumerate(self.K_COLS):
+            anchor = "center" if key == "status" else "w"
+            tk.Label(hdr, text=title, font=self.F(9), fg=C_MUTED, bg=C_CARD, anchor=anchor).grid(
+                row=0, column=i, sticky="ew", pady=4, padx=2)
+        self.k_table_wrap, self.k_table = self.scroll_list(p)
         self.k_table_wrap.pack(fill="both", expand=True)
-        self.empty(self.k_table, "처리할 요청이 여기에 나와요.")
-        self.k_rows = {}
-        self.k_log = self.logbox(p, 6)
+        self.empty(self.k_table, "카톡을 붙여 넣고 [읽기]를 누르면 여기에 표가 나와요.")
+        self.k_data, self.k_meta = {}, None
+        self.k_log = self.logbox(p, 4)
         self.k_log.pack(fill="x", pady=(8, 0))
+
+    def k_grid(self, frame):
+        for i, (_key, _t, w, _k) in enumerate(self.K_COLS):
+            frame.columnconfigure(i, minsize=w, weight=1 if not w else 0)
 
     def k_start(self):
         err = self.api.kakao_start(self.k_text.get("1.0", "end").strip())
         if err:
             self.k_status.configure(text=err)
             return
-        self.k_rows = {}
+        self.k_data = {}
         self.empty(self.k_table, "요청을 읽는 중이에요...")
         self.log_clear(self.k_log)
+        self.k_count()
+
+    def k_rows(self, d):
+        """읽기 결과로 확인 표를 그린다."""
+        import kakao_job
+        from datetime import date as _date
+        self.k_meta = dict(d, names_set=set(d["names"]), ics_set=set(d["ics"]),
+                           today_d=_date.fromisoformat(d["today"]), problems=kakao_job.row_problems)
+        self.clear(self.k_table)
+        self.k_data = {}
+        if not d["rows"]:
+            self.empty(self.k_table, "읽은 요청이 없어요.")
+        for r in d["rows"]:
+            self.k_add_row(r)
+        self.k_count()
+        self.k_table.canvas.yview_moveto(0)
+
+    def k_add_row(self, r):
+        m = self.k_meta
+        line = tk.Frame(self.k_table, bg=C_BG, padx=6, pady=4)
+        line.pack(fill="x")
+        tk.Frame(self.k_table, bg=C_LINE, height=1).pack(fill="x")
+        self.k_grid(line)
+        var = tk.BooleanVar(value=r["checked"])
+        w = {}
+        tk.Checkbutton(line, variable=var, bg=C_BG, activebackground=C_BG,
+                       command=lambda: self.k_changed(r["id"])).grid(row=0, column=0)
+        values = {"ic": m["ics"], "kind": m["kinds"], "action": m["actions"]}
+        for i, (key, _t, _w, kind) in enumerate(self.K_COLS):
+            if kind in ("combo", "entry"):
+                choices = None
+                if kind == "combo":
+                    choices = (lambda rid=r["id"]: self.k_person_list(rid)) if key == "person" else values[key]
+                cf = CellField(line, self.F(9), choices, on_change=lambda rid=r["id"]: self.k_changed(rid))
+                cf.set(r[key])
+                cf.grid(row=0, column=i, sticky="ew", padx=2)
+                w[key] = cf
+        sub = self.badge(line, "", "run")
+        sub.grid(row=0, column=2)
+        cell, st = self.status_cell(line, r["status"])
+        cell.grid(row=0, column=8)
+        note = r["note"] and f"{r['status']} · {r['note']} · " or ""
+        src = self.label(line, note + r["source"], 8, fg="#92400E" if note else C_MUTED, wraplength=120, width=1)
+        src.grid(row=0, column=9, sticky="ew", padx=(4, 0))
+        src.bind("<Configure>", lambda e: src.configure(wraplength=max(80, e.width - 4)))
+        self.k_data[r["id"]] = {"row": dict(r), "var": var, "w": w, "sub": sub, "st": st, "src": src}
+        self.k_changed(r["id"])
+
+    def k_person_list(self, rid):
+        """어르신 목록: 그 지원사 담당 어르신 먼저, 그다음 나머지 (다른 선생님 담당을 고르면 대직)."""
+        ic = self.k_data[rid]["w"]["ic"].get()
+        mine = sorted(self.k_meta["clients"].get(ic, []))
+        return mine + [n for n in self.k_meta["names"] if n not in set(mine)]
+
+    def k_changed(self, rid):
+        d = self.k_data.get(rid)
+        if not d or not self.k_meta:
+            return
+        m, row = self.k_meta, d["row"]
+        for key, wdg in d["w"].items():
+            row[key] = wdg.get().strip()
+        row["checked"] = bool(d["var"].get())
+        bad = m["problems"](row, m["ics_set"], m["names_set"], m["today_d"]) if row["checked"] else set()
+        for key, wdg in d["w"].items():
+            wdg.warn(key in bad)
+        ok_person = row["person"] in m["names_set"] and row["ic"] in m["ics_set"]
+        self.set_badge(d["sub"], "대직" if ok_person and row["person"] not in m["clients"].get(row["ic"], []) else "",
+                       "run")
+        self.k_count()
+
+    def k_count(self):
+        n = sum(1 for d in self.k_data.values() if d["var"].get())
+        self.k_run_btn.set_text(f"실행 ({n}건)" if n else "실행")
+
+    def k_run(self):
+        if not self.k_data:
+            self.toast("먼저 카톡을 붙여 넣고 [읽기]를 눌러 주세요.")
+            return
+        for rid in self.k_data:
+            self.k_changed(rid)
+        rows = [d["row"] for d in self.k_data.values()]
+        err = self.api.kakao_run(rows)
+        if err:
+            self.toast(err)
+            self.k_status.configure(text=err)
+            return
+        self.log_clear(self.k_log)
+        for d in self.k_data.values():
+            if d["var"].get():
+                self.set_badge(d["st"], "대기")
 
     def k_row(self, r):
-        row = self.k_rows.get(r["id"])
-        if row is None:
-            if not self.k_rows:
-                self.clear(self.k_table)
-            line = tk.Frame(self.k_table, bg=C_BG, padx=8, pady=6)
-            line.pack(fill="x")
-            tk.Frame(self.k_table, bg=C_LINE, height=1).pack(fill="x")
-            lab = self.label(line, "", 9, width=46, wraplength=330)
-            lab.pack(side="left")
-            cell, st = self.status_cell(line, "")
-            cell.pack(side="left", padx=8)
-            note = self.label(line, "", 9, fg=C_MUTED, wraplength=330)
-            note.pack(side="left", fill="x", expand=True)
-            row = self.k_rows[r["id"]] = (lab, st, note)
-        lab, st, note = row
-        lab.configure(text=r["label"])
-        self.set_badge(st, r["status"])
-        note.configure(text=r["note"] or "")
-        self.k_table.update_idletasks()
-        self.k_table.canvas.yview_moveto(1)
+        """실행 중 상태 알림: 표의 그 줄 상태 칸과 메모를 바꾼다."""
+        d = self.k_data.get(r["id"])
+        if not d:
+            return
+        self.set_badge(d["st"], r["status"])
+        if r.get("note"):
+            d["src"].configure(text=f"{r['note']} · {d['row']['source']}", fg="#92400E")
 
     def k_question(self, d):
         if not d:
@@ -674,11 +906,13 @@ class TkUI:
             n = self.label(box, "-", 16, bg=C_CARD)
             n.pack(fill="x")
             self.c_metric[key] = n
-        self.c_warn = self.label(p, "", 9, fg="#92400E", bg="#FEF3C7", padx=10, pady=6, wraplength=720)
-        self.c_left = tk.Frame(p, bg="#FEF3C7", padx=10, pady=4)
-        self.c_left_text = self.label(self.c_left, "", 9, fg="#92400E", bg="#FEF3C7")
+        self.c_warn_box = RoundPanel(p, "#FEF3C7", pady=8)
+        self.c_warn = self.label(self.c_warn_box.inner, "", 9, fg="#92400E", bg="#FEF3C7", wraplength=720)
+        self.c_warn.pack(fill="x")
+        self.c_left = RoundPanel(p, "#FEF3C7")
+        self.c_left_text = self.label(self.c_left.inner, "", 9, fg="#92400E", bg="#FEF3C7")
         self.c_left_text.pack(side="left")
-        self.RB(self.c_left, "휴지통으로", self.c_clear_left, height=26, padx=10, size=8, bg="#FEF3C7").pack(side="right")
+        self.RB(self.c_left.inner, "휴지통으로", self.c_clear_left, height=26, padx=10, size=8, bg="#FEF3C7").pack(side="right")
         self.c_anchor = tk.Frame(p, bg=C_BG)  # 알림 줄들이 들어갈 자리
         self.c_anchor.pack(fill="x")
         self.c_prog = self.label(p, "변환 시작을 누르면 시작해요.", 9, fg=C_MUTED)
@@ -686,10 +920,10 @@ class TkUI:
         self.c_bar = ttk.Progressbar(p, style="Thin.Horizontal.TProgressbar", maximum=100)
         self.c_bar.pack(fill="x", pady=(4, 8))
         self.c_review = self.build_review(p)
-        self.c_done = tk.Frame(p, bg="#DCFCE7", padx=10, pady=4)
-        self.label(self.c_done, "변환이 끝났어요. 다 확인했으면 원본과 결과를 정리할 수 있어요.", 9, fg="#166534",
+        self.c_done = RoundPanel(p, "#DCFCE7")
+        self.label(self.c_done.inner, "변환이 끝났어요. 다 확인했으면 원본과 결과를 정리할 수 있어요.", 9, fg="#166534",
                    bg="#DCFCE7").pack(side="left")
-        self.RB(self.c_done, "원본·결과 휴지통으로", self.c_delete, height=26, padx=10, size=8, bg="#DCFCE7").pack(side="right")
+        self.RB(self.c_done.inner, "원본·결과 휴지통으로", self.c_delete, height=26, padx=10, size=8, bg="#DCFCE7").pack(side="right")
         self.c_log = self.logbox(p, 10)
         self.c_log.pack(fill="both", expand=True)
 
@@ -741,7 +975,7 @@ class TkUI:
         self.c_bar["value"] = 0
         self.log_clear(self.c_log)
         self.c_done.pack_forget()
-        self.c_warn.pack_forget()
+        self.c_warn_box.pack_forget()
         self.c_start.set_enabled(False)
 
     def c_do_upload(self):
@@ -1053,6 +1287,8 @@ class TkUI:
             self.k_status.configure(text=d)
         elif ev == "k_row":
             self.k_row(d)
+        elif ev == "k_rows":
+            self.k_rows(d)
         elif ev == "k_log":
             self.log_add(self.k_log, d)
         elif ev == "k_question":
@@ -1061,7 +1297,7 @@ class TkUI:
             self.c_log_line(d)
         elif ev == "conv_warn":
             self.c_warn.configure(text="⚠ " + "\n⚠ ".join(d))
-            self.c_warn.pack(fill="x", pady=(8, 0), in_=self.c_anchor)
+            self.c_warn_box.pack(fill="x", pady=(8, 0), in_=self.c_anchor)
             self.conv_refresh()
         elif ev == "conv_progress":
             if d.get("msg"):

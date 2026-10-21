@@ -56,6 +56,7 @@ class Api:
             app, self._b["kakao"],
             status=lambda t: self._emit("k_status", t),
             row=lambda r: self._emit("k_row", r),
+            rows=lambda d: self._emit("k_rows", d),
             log=lambda line: self._emit("k_log", line),
             question=self._on_question)
         app._idle["busy"] = self._any_busy
@@ -192,6 +193,9 @@ class Api:
     # ---- 카톡 요청 처리
     def kakao_start(self, text):
         return self._job.start(text)
+
+    def kakao_run(self, rows):
+        return self._job.run(rows)
 
     def kakao_answer(self, value):
         self._job.answer(value)
