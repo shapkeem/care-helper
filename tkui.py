@@ -292,28 +292,66 @@ class CellField(tk.Canvas):
         self._close()
         if not vals:
             return
+        n = min(8, len(vals))
         top = self._pop = tk.Toplevel(self)
         top.overrideredirect(True)
-        top.configure(bg="#CBD5E1")
-        lb = tk.Listbox(top, font=self.e.cget("font"), height=min(8, len(vals)), relief="flat", bd=0,
-                        highlightthickness=0, activestyle="none", selectbackground="#DBEAFE",
-                        selectforeground=C_TEXT, exportselection=False)
+        top.configure(bg="#CBD5E1")  # 1px 연한 테두리
+        body = tk.Frame(top, bg="#FFFFFF", padx=4, pady=4)
+        body.pack(fill="both", expand=True, padx=1, pady=1)
+        lb = tk.Listbox(body, font=self.e.cget("font"), height=n, relief="flat", bd=0, highlightthickness=0,
+                        activestyle="none", selectbackground="#DBEAFE", selectforeground="#1D4ED8",
+                        fg=C_TEXT, bg="#FFFFFF", exportselection=False)
         for v in vals:
-            lb.insert("end", v)
-        lb.pack(fill="both", expand=True, padx=1, pady=1)
-        top.geometry(f"{max(self.winfo_width(), 120)}x{min(8, len(vals)) * 22 + 4}"
-                     f"+{self.winfo_rootx()}+{self.winfo_rooty() + self.H}")
+            lb.insert("end", "  " + v)
+        if len(vals) > n:  # 많으면 얇은 스크롤바
+            sb = ThinScrollbar(body, lb.yview, "#FFFFFF")
+            lb.configure(yscrollcommand=sb.set)
+            sb.pack(side="right", fill="y")
+        lb.pack(side="left", fill="both", expand=True)
+        w = max(self.winfo_width(), 140)
+        top.update_idletasks()  # 목록 높이에 딱 맞게 (아래 빈 공간 없이)
+        top.geometry(f"{w}x{body.winfo_reqheight() + 2}+{self.winfo_rootx()}+{self.winfo_rooty() + self.H + 2}")
+        self._lb = lb
+
+        def hover(e):  # 마우스가 올라간 줄을 파랗게
+            i = lb.nearest(e.y)
+            lb.selection_clear(0, "end")
+            lb.selection_set(i)
 
         def pick(_e=None):
             sel = lb.curselection()
             if sel:
-                self.set(lb.get(sel[0]))
+                self.set(lb.get(sel[0]).strip())
                 self._on_change()
             self._close()
+
+        def wheel(e):  # 휠은 이 목록만 움직인다 (프로그램 전체가 같이 움직이지 않게)
+            lb.yview_scroll(int(-e.delta / 120), "units")
+            return "break"
+        lb.bind("<Motion>", hover)
         lb.bind("<ButtonRelease-1>", pick)
         lb.bind("<Return>", pick)
+        lb.bind("<MouseWheel>", wheel)
+        top.bind("<Escape>", lambda e: self._close())
+
+        def outside(e):  # 목록 밖(빈 곳 포함)을 누르면 닫는다
+            wdg = e.widget
+            while wdg is not None:
+                if wdg is top or wdg is self:
+                    return
+                wdg = getattr(wdg, "master", None)
+            self._close()
+        root = self.winfo_toplevel()
+        self._outside = (root, root.bind("<Button-1>", outside, add="+"))
 
     def _close(self):
+        if getattr(self, "_outside", None):
+            root, fid = self._outside
+            try:
+                root.unbind("<Button-1>", fid)
+            except tk.TclError:
+                pass
+            self._outside = None
         if self._pop is not None:
             try:
                 self._pop.destroy()
@@ -339,6 +377,9 @@ class RoundField(tk.Canvas):
         else:
             self.w = tk.Text(self, font=font, relief="flat", bd=0, bg="#FFFFFF", wrap="word",
                              highlightthickness=0, height=lines)
+            self._sb = ThinScrollbar(self, self.w.yview, "#FFFFFF")  # 글이 길면 얇은 스크롤바
+            self.w.configure(yscrollcommand=self._sb.set)
+            self._sbwin = self.create_window(0, 8, window=self._sb, anchor="ne")
         self._win = self.create_window(12, 8, window=self.w, anchor="nw")
         self._focus = False
         self.w.bind("<FocusIn>", lambda e: self._set(True), add="+")
@@ -363,7 +404,9 @@ class RoundField(tk.Canvas):
             self.coords(self._win, 12, h / 2)
             self.itemconfigure(self._win, anchor="w", width=w - 24)
         else:
-            self.itemconfigure(self._win, width=w - 24, height=h - 16)
+            self.itemconfigure(self._win, width=w - 36, height=h - 16)
+            self.coords(self._sbwin, w - 8, 8)
+            self.itemconfigure(self._sbwin, height=h - 16)
 
 
 class TkUI:
@@ -549,8 +592,8 @@ class TkUI:
                 if acc and not getattr(w, "_wheel_job", None):
                     w._wheel_job = self.root.after(16, lambda c=w: self._wheel_flush(c))
                 return
-            if isinstance(w, tk.Text):
-                return
+            if isinstance(w, (tk.Text, tk.Listbox)):
+                return  # 글칸·고르는 목록은 자기 안에서만 움직인다
             w = w.master
 
     def _wheel_flush(self, c):
