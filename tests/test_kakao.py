@@ -339,9 +339,7 @@ def test_real_service_only_modify(monkeypatch):
 
 def test_real_merge_to_outing(monkeypatch):
     ip2 = _ip2(monkeypatch)  # 맨 앞 '[' 가 빠진 채 복사된 경우도
-    text = ("김남희생지사4동] [오후 12:41] 안효숙1123~1133방문
-안효숙1134~1430청소취소
-"
+    text = ("김남희생지사4동] [오후 12:41] 안효숙1123~1133방문\n안효숙1134~1430청소취소\n"
             "안효숙1123~1430외출동행으로 변경요청합니다.")
     out = run(ip2, text)
     assert [(x.ic, x.frm, x.to, x.kind, x.action) for x in out] == [
