@@ -452,6 +452,24 @@ def clear_days(page, dlg, ic, days, log):
     return total
 
 
+def upload_clear_days(rows):
+    """업로드 전에 지울 날: 엑셀 안 날짜의 처음~끝 기간의 모든 날을, 등록할 줄이 있는 지원사마다.
+    (새 계획서에서 빠진 날의 예전 일정도 지우기 위해 기간 전체를 본다) → {지원사: [날짜…]}"""
+    dates = []
+    for r in rows:
+        d = _preview_date(r["date"])
+        if d is None:
+            if r["ok"]:
+                raise WorkError(f"미리보기 날짜 '{r['date']}'를 읽지 못했어요. 등록하지 않고 멈췄어요.")
+            continue
+        dates.append(d)
+    if not dates:
+        return {}
+    first, last = min(dates), max(dates)
+    span = [first + timedelta(days=i) for i in range((last - first).days + 1)]
+    return {w: list(span) for w in sorted({r["worker"] for r in rows if r["ok"]})}
+
+
 def _preview_date(text):
     digits = re.sub(r"\D", "", text or "")
     try:
@@ -493,14 +511,10 @@ def upload_plan_excel(page, dlg, path, log, save=True, save_timeout=900, clear=T
         page.evaluate("() => { $('#DIV_LAYER').html('').parent().hide(); }")
         return result
     if clear:
-        days = {}
-        for r in rows:
-            d = _preview_date(r["date"])
-            if r["ok"] and d is None:
-                raise WorkError(f"미리보기 날짜 '{r['date']}'를 읽지 못했어요. 등록하지 않고 멈췄어요.")
-            if r["ok"]:
-                days.setdefault(r["worker"], set()).add(d)
-        log(f"이미 올라와 있는 일정을 지우는 중... ({len(days)}명)")
+        days = upload_clear_days(rows)
+        span = sorted({d for ds in days.values() for d in ds})
+        if span:
+            log(f"이미 올라와 있는 일정을 지우는 중... ({len(days)}명, {span[0]:%m/%d}~{span[-1]:%m/%d})")
         tab = page.context.new_page()  # 미리보기 창은 그대로 두고 다른 탭에서 지운다
         tab.on("dialog", lambda d: d.accept())
         try:
