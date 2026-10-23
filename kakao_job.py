@@ -174,6 +174,7 @@ def write_upload_excel(items, roster, workers, now, path):
     wb.save(path)
 
 
+NOT_IN_LAYER = "대상자 목록에"  # goodeos_work.add_plan: 지원사 일정 창에 그 어르신이 없을 때의 오류 문구
 ACTIONS_RUN = ("실적", "일정등록", "수정", "삭제")
 FILL_NOTES = ("범위", "끝나는 시간", "시간을 알아보지")  # 시간만 채우면 되는 '사람 처리' → 표에서 노란 칸으로
 
@@ -246,6 +247,7 @@ class KakaoJob:
         self._lock = threading.Lock()
         self._ask_lock = threading.Lock()
         self._next_id = 0
+        self._to_upload = []
 
     # ---- 화면에서 부르는 것
     def start(self, text):
@@ -345,6 +347,14 @@ class KakaoJob:
             runner.run_item(page, dlg, it, self.ask_user, self.log, now=now())
             it.status, it.note = "완료", ""
         except g.WorkError as e:
+            if it.substitute and NOT_IN_LAYER in str(e) and it.action in ("일정등록", "실적", "수정") and it.frm and it.to:
+                # 대직: 대직자 일정 창에 이 어르신이 없어서 못 넣음 → 나중에 일정실적업로드 엑셀로 올린다
+                it.status, it.note = "대기", "대직: 엑셀로 올릴 예정"
+                self.log("  대직자 일정 창에 어르신이 없어 일정실적업로드로 올릴게요")
+                with self._lock:
+                    self._to_upload.append(it)
+                self._set_row(it)
+                return
             it.status, it.note = ("건너뜀", "") if str(e) == "건너뜀" else ("확인 필요", str(e))
             self.log(f"  {it.status}: {e}")
         except Exception as e:
@@ -474,10 +484,10 @@ class KakaoJob:
             with sync_playwright() as pw:
                 self._status("goodeos 연결 중...")
                 page = app.get_page(pw)
-                subs = [it for it in items if it.substitute]
-                self._run_parallel([it for it in items if not it.substitute], now)
-                if subs and not self.stopping:
-                    self._upload_substitutes(page, subs, ctx["roster"], now, ctx["today"])
+                self._to_upload = []
+                self._run_parallel(items, now)  # 대직도 먼저 대직자 일정 창에서 평소처럼 처리
+                if self._to_upload and not self.stopping:
+                    self._upload_substitutes(page, self._to_upload, ctx["roster"], now, ctx["today"])
             done = sum(it.status == "완료" for it in items)
             head = "멈춤" if self.stopping else "끝"
             self._status(f"{head} · 완료 {done}건 / 실행 {len(items)}건")

@@ -559,9 +559,7 @@ class Interpreter:
                 it.status, it.note = "사람 처리", "시간이 없어서 어떻게 바꿀지 사람이 봐야 해요"
         for it in items:
             if it.person in sub_names:
-                it.substitute = True
-                if it.status == "대기" and it.action not in ("실적", "일정등록"):
-                    it.status, it.note = "사람 처리", "대직 일정의 수정·삭제는 사람이 해 주세요"
+                it.substitute = True  # 대직자 일정 창에서 먼저 처리하고, 창에 어르신이 없으면 엑셀로 올린다
         return items
 
     @staticmethod

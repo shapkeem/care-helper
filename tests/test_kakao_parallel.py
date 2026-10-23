@@ -56,3 +56,19 @@ def test_review_rows():
     it = kakao_job.row_to_item(row, roster, today)
     assert (it.ic, it.person, it.date, it.frm, it.to, it.substitute) ==         ("이미화", "장귀현", date(2026, 10, 20), "1430", "1500", False)
     assert kakao_job.row_to_item(dict(row, person="형순덕"), roster, today).substitute is True
+
+
+def test_substitute_falls_back_to_upload(monkeypatch):
+    def fake_run(page, dlg, it, ask, log, now=None):
+        raise kakao_job.g.WorkError(f"일정 창 대상자 목록에 '{it.person}' 어르신이 없어요.")
+    monkeypatch.setattr(kakao_job.runner, "run_item", fake_run)
+    monkeypatch.setattr(kakao_job.g, "Dialogs", lambda tab: None)
+    job = kakao_job.KakaoJob(FakeApp(), {"v": False}, lambda t: None, lambda r: None, lambda m: None,
+                             lambda q, o: None)
+    sub = kakao.Item(ic="이미화", person="형순덕", frm="1000", to="1030", action="일정등록", substitute=True)
+    own = kakao.Item(ic="이미화", person="장귀현", frm="1000", to="1030", action="일정등록")
+    for it in (sub, own):
+        job._set_row(it)
+    job._run_parallel([sub, own], lambda: None)
+    assert job._to_upload == [sub] and sub.status == "대기"  # 대직만 엑셀로 넘김
+    assert own.status == "확인 필요"  # 자기 담당이면 그대로 오류로 알림

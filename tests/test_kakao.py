@@ -276,7 +276,7 @@ def test_substitute_worker(ip):
     [own] = run(ip, "박미해\n형순덕 어르신 어제 1000-1030 방문 실적 부탁드립니다")
     assert (own.ic, own.substitute) == ("박미해", False)
     [mod] = run(ip, "이미화\n형순덕 어르신 어제 1000-1030 방문 수정 부탁드립니다")
-    assert mod.status == "사람 처리"  # 대직 일정 수정·삭제는 사람이
+    assert (mod.substitute, mod.action, mod.status) == (True, "수정", "대기")  # 대직 수정도 대직자 창에서 처리
 
 
 def test_write_upload_excel(tmp_path):
