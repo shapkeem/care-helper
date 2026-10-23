@@ -304,3 +304,33 @@ def test_same_line_action_and_spaced_services(ip):
     out = run(ip, "이미화\n장귀현 1000-1030 보건 교육 일정등록\n장귀현 1100-1120 보건 입력\n김말순 1500-1520 건강 교육 입력")
     assert [(x.kind, x.action, x.status) for x in out] == [("보건교육", "일정등록", "대기"), ("보건교육", "일정등록", "대기"),
                                                            ("건강교육", "일정등록", "대기")]
+
+
+REAL_LIKE = ROSTER + [  # 실제 카톡 모양 그대로 (이름은 가명)
+    {"성명": "김영희A", "생활지원사": "오경주", "이용상태": "이용", "생년월일": "1941.01.01"},
+    {"성명": "신해숙", "생활지원사": "오경주", "이용상태": "이용", "생년월일": "1942.01.01"},
+    {"성명": "유둘순", "생활지원사": "정미숙", "이용상태": "이용", "생년월일": "1943.01.01"},
+]
+
+
+def _ip2(monkeypatch):
+    monkeypatch.setattr(kakao.jev, "ask", lambda *a, **k: (_ for _ in ()).throw(AssertionError("jev")))
+    monkeypatch.setattr(kakao.jev, "choice", lambda *a, **k: (_ for _ in ()).throw(AssertionError("jev")))
+    return kakao.Interpreter(REAL_LIKE, lambda q, o: (_ for _ in ()).throw(AssertionError(q)), MON)
+
+
+def test_real_swap_message(monkeypatch):
+    ip2 = _ip2(monkeypatch)
+    text = ("[오경주생지사1동] [오후 12:39] 김영희A1335~1345(방문)\n             1346~1430(보건)\n"
+            "신해숙1006~1010(전화)삭제해 주시고\n김영희A1006~1010(전화)\n신해숙1335~1430(방문)\n수정 부탁합니다.")
+    out = run(ip2, text)
+    assert [(x.person, x.frm, x.to, x.kind, x.action, x.status) for x in out] == [
+        ("김영희A", "1335", "1345", "방문", "삭제", "대기"), ("김영희A", "1346", "1430", "보건교육", "삭제", "대기"),
+        ("신해숙", "1006", "1010", "전화", "삭제", "대기"), ("김영희A", "1006", "1010", "전화", "수정", "대기"),
+        ("신해숙", "1335", "1430", "방문", "수정", "대기")]
+
+
+def test_real_service_only_modify(monkeypatch):
+    ip2 = _ip2(monkeypatch)
+    [it] = run(ip2, "[정미숙생지사4동] [오후 12:43] 10/23 금\n유둘순 청소관리 수정 부탁드립니다")
+    assert (it.person, it.date, it.frm, it.kind, it.action, it.status) == ("유둘순", date(2026, 10, 23), "", "청소", "수정", "대기")

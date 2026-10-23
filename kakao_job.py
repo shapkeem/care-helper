@@ -215,7 +215,8 @@ def row_problems(row, ics, names, today):
         bad.add("person")
     if not parse_md(row.get("date"), today):
         bad.add("date")
-    if not parse_range(row.get("time")) and not (row.get("action") in ("실적", "삭제") and not row.get("time")):
+    no_time_ok = row.get("action") in ("실적", "삭제") or (row.get("action") == "수정" and row.get("kind") in g.SERVICES)
+    if not parse_range(row.get("time")) and not (no_time_ok and not row.get("time")):
         bad.add("time")  # 실적·삭제는 시간을 비우면 그날 일정에서 찾는다
     if row.get("kind") not in g.SERVICES:
         bad.add("kind")

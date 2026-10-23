@@ -127,7 +127,16 @@ def _modify(page, dlg, it, ask, log, now):
     그 시간과 겹치는 기존 일정은 어르신이 누구든 지우고(실적 있으면 실적부터) 적힌 대로 등록한다.
     지난 시간이면 실적까지. 똑같은 일정이 이미 있으면 그대로 두고 실적만 확인."""
     if not it.frm:
-        raise WorkError("시간이 없어서 어떻게 바꿀지 사람이 봐야 해요.")
+        if not it.kind:
+            raise WorkError("시간이 없어서 어떻게 바꿀지 사람이 봐야 해요.")
+        # 시간 없이 서비스만 적은 수정: 그날 그 어르신 일정이 하나면 시간은 두고 서비스만 바꾼다
+        ps = [p for p in day_plans(page, it.ic, it.person, it.date) if g.CODE_TO_KIND.get(p["code"]) != it.kind]
+        if not ps:
+            log(f"{it.person} {it.date:%m/%d} 일정이 이미 {it.kind}예요 (또는 그날 일정이 없어요)")
+            return
+        if len(ps) > 1:
+            raise WorkError(f"그날 일정이 {len(ps)}개라 어느 걸 {it.kind}(으)로 바꿀지 시간을 적어 주세요.")
+        return _replace(page, dlg, it, ps[0], it.kind, log, now)
     kind = it.kind
     ps = day_plans_all(page, it.ic, it.date)
     same = [p for p in ps if g._norm(p["person"]) == g._norm(it.person) and p["from"] == it.frm

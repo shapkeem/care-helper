@@ -555,7 +555,7 @@ class Interpreter:
                 it.status, it.note = "사람 처리", f"'{it.kind[1:]}' 요청은 자동 처리하지 않아요"
             elif it.action == "기타":
                 it.status, it.note = "요청 아님", "일정/실적 요청이 아닌 것 같아요"
-            elif it.action == "수정" and not it.frm:
+            elif it.action == "수정" and not it.frm and not it.kind:  # 서비스만 적은 수정은 그날 일정의 서비스를 바꾼다
                 it.status, it.note = "사람 처리", "시간이 없어서 어떻게 바꿀지 사람이 봐야 해요"
         for it in items:
             if it.person in sub_names:
