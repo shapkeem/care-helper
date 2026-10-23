@@ -34,6 +34,17 @@ C_SIDE_ON = "#E2E8F0"
 FONT = "맑은 고딕"
 
 
+_FONTS = {}
+
+
+def _font(size, bold=False):
+    """글꼴은 한 번 만들어 계속 쓴다 (매번 새로 만들면 지워질 때 글자 모양이 바뀔 수 있다)."""
+    key = (size, bold)
+    if key not in _FONTS:
+        _FONTS[key] = tkfont.Font(family=FONT, size=size, weight="bold" if bold else "normal")
+    return _FONTS[key]
+
+
 def _round_points(x1, y1, x2, y2, r):
     """smooth=True 다각형으로 그리는 둥근 사각형 꼭짓점."""
     return [x1 + r, y1, x2 - r, y1, x2, y1, x2, y1 + r, x2, y2 - r, x2, y2,
@@ -320,7 +331,9 @@ class RoundField(tk.Canvas):
         super().__init__(master, height=h, bg=bg, highlightthickness=0, bd=0)
         if width:
             self.configure(width=width)
-        font = tkfont.Font(family=FONT, size=size)
+        # 한글을 조합하는 동안에도 같은 글꼴로 보이게 기본 입력 글꼴(TkTextFont)을 쓴다 (TkUI 에서 맑은 고딕으로 맞춤)
+        font = tkfont.nametofont("TkTextFont") if size == 10 else _font(size)
+        self._font = font
         if lines == 1:
             self.w = tk.Entry(self, font=font, relief="flat", bd=0, bg="#FFFFFF", show=show, highlightthickness=0)
         else:
@@ -378,6 +391,9 @@ class TkUI:
             root.iconbitmap(default=os.path.join(app.RES_DIR, "icon.ico"))
         except Exception:
             pass
+        # 기본 글꼴을 모두 맑은 고딕으로: 한글 입력(조합) 중 글자가 커졌다 작아졌다 하지 않게
+        for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont"):
+            tkfont.nametofont(name).configure(family=FONT, size=10)
         self.RB = _round_button_class()
         style = ttk.Style()
         try:
@@ -394,7 +410,7 @@ class TkUI:
 
     # ---------------------------------------------------------------- 공통 부품
     def F(self, size, bold=False):
-        return tkfont.Font(family=FONT, size=size, weight="bold" if bold else "normal")
+        return _font(size, bold)
 
     def label(self, parent, text="", size=10, bold=False, fg=None, bg=None, **kw):
         return tk.Label(parent, text=text, font=self.F(size, bold), fg=fg or C_TEXT,
@@ -953,6 +969,7 @@ class TkUI:
         self.RB(self.c_left.inner, "휴지통으로", self.c_clear_left, height=26, padx=10, size=8, bg="#FEF3C7").pack(side="right")
         self.c_anchor = tk.Frame(p, bg=C_BG)  # 알림 줄들이 들어갈 자리
         self.c_anchor.pack(fill="x")
+        self.c_anchor.lower()  # 알림 줄(먼저 만든 것)이 이 칸 뒤에 가려지지 않게
         self.c_prog = self.label(p, "변환 시작을 누르면 시작해요.", 9, fg=C_MUTED)
         self.c_prog.pack(fill="x", pady=(8, 0))
         self.c_bar = ttk.Progressbar(p, style="Thin.Horizontal.TProgressbar", maximum=100)

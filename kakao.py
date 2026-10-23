@@ -18,6 +18,15 @@ KINDS = {  # 카톡 낱말 → 서비스 (goodeos_work.SERVICES 키). 긴 낱말
     "기타사회참여": "기타사회참여", "자조모임": "자조모임", "영양교육": "영양교육", "보건교육": "보건교육",
     "건강교육": "건강교육", "우울예방": "우울예방", "식사관리": "식사", "개별상담": "상담", "사례관리": "상담",
 }
+# 띄어쓰기·줄임말도 알아듣게 (예: '보건 교육', '보건', '영양교육 프로그램'). 긴 것부터 본다
+KIND_PATTERNS = [
+    (r"기타\s*사회\s*참여", "기타사회참여"), (r"보건\s*교육|보건(?!소|복지|증|용품|의료)", "보건교육"),
+    (r"영양\s*교육|영양(?!제|식|사|가|실)", "영양교육"), (r"건강\s*교육", "건강교육"), (r"우울\s*예방|우울", "우울예방"),
+    (r"평생\s*교육", "평생교육"), (r"사회\s*관계", "사회관계"), (r"여가\s*문화", "여가문화"), (r"자조\s*모임", "자조모임"),
+    (r"정보\s*제공", "정보제공"), (r"식사\s*관리", "식사"), (r"개별\s*상담|사례\s*관리", "상담"),
+    (r"인지\s*(?:활동)?", "인지"), (r"청소\s*(?:관리)?", "청소"), (r"외출\s*(?:동행)?", "외출"),
+    (r"전화", "전화"), (r"방문", "방문"),
+]
 EXCLUDED = ["병원동행", "식사", "반찬", "자원연계", "생활용품", "식료품", "사탕", "교육", "회의", "단체", "건강",
             "기관업무"]
 CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": "청소", "41101": "외출",
@@ -27,9 +36,9 @@ CODE_KINDS = {"19101": "전화", "1A102": "방문", "34202": "인지", "43202": 
 
 # 요청 낱말 → 요청 종류. 그 줄 뒤에 처음 나오는 낱말로 정한다 (앞의 것이 먼저 맞으면 뒤의 것은 보지 않음)
 ACTION_WORDS = [
-    (r"실적\s*(시간)?\s*입력", "실적"), (r"수정\s*실적", "수정"), (r"입력\s*(및|\.|,)?\s*(실적|실행)", "일정등록"),
+    (r"실적\s*(시간)?\s*(입력|등록)", "실적"), (r"수정\s*실적", "수정"), (r"입력\s*(및|\.|,)?\s*(실적|실행)", "일정등록"),
     (r"삭제|취소|빼\s*주|지워", "삭제"), (r"수정|변경|조정|바꿔|옮겨|당겨|미뤄", "수정"),
-    (r"실적|실행|기록", "실적"), (r"입력|넣어|빠져|빠졌|빠진|누락|추가", "일정등록"),
+    (r"실적|실행|기록", "실적"), (r"입력|넣어|빠져|빠졌|빠진|누락|추가|등록", "일정등록"),
 ]
 # '못 가요' 같은 말은 사정 설명일 때가 많아서, 다른 요청 낱말이 하나도 없을 때만 삭제로 본다
 WEAK_ACTION_WORDS = [(r"못\s*가(?!져)|못\s*갔|안\s*갔", "삭제")]
@@ -319,10 +328,10 @@ def find_dates(text, msg_date):
 def find_kinds(text):
     """→ [(위치, 서비스 또는 '!제외낱말')]. '보건교육'처럼 서비스 이름 안의 '교육'은 제외 낱말로 보지 않는다."""
     out, spans = [], []
-    for w in sorted(KINDS, key=len, reverse=True):
-        for m in re.finditer(w, text):
-            if not any(s <= m.start() < e for s, e in spans):
-                out.append((m.start(), KINDS[w]))
+    for rx, kind in KIND_PATTERNS:
+        for m in re.finditer(rx, text):
+            if not any(s < m.end() and m.start() < e for s, e in spans):
+                out.append((m.start(), kind))
                 spans.append((m.start(), m.end()))
     for w in EXCLUDED:
         for m in re.finditer(w, text):
@@ -666,8 +675,12 @@ class Interpreter:
             if it.action or not words:
                 continue
             p = getattr(it, "pos", 0)
+            ls = masked.rfind("\n", 0, p) + 1
+            le = masked.find("\n", p)
+            le = len(masked) if le < 0 else le
+            same = [a for q, a in words if ls <= q < le]  # 같은 줄에 요청 말이 있으면 그것 (다음 줄 요청을 가져가지 않게)
             after = [a for q, a in words if q >= p]
-            it.action = after[0] if after else words[-1][1]
+            it.action = same[0] if same else (after[0] if after else words[-1][1])
         todo = [it for it in items if not it.action]
         if not todo:
             return

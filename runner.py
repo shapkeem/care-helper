@@ -89,10 +89,10 @@ def _ensure(page, dlg, it, ask, log, now):
     if not c:
         future = [p for p in ps if not p["result"]]
         raise WorkError("실적이 없는 지난 일정이 없어요" + (f" (미래 일정 {len(future)}개는 실적을 넣지 않아요)" if future else ""))
-    p = c[0] if len(c) == 1 else pick(ask, f"{it.label()}\n실적 없는 일정이 여러 개예요. 어느 거예요?", c)
-    g.open_result(page, it.person, it.ic, *g.plan_month(it.date))
-    g.register_result(page, dlg, p["seq"], it.date)
-    log(f"실적 등록: {_t(p)}")
+    for p in c:  # 이미 끝났는데 실적이 없는 일정은 하나든 여러 개든 모두 넣는다 (서비스를 적었으면 그 서비스만)
+        g.open_result(page, it.person, it.ic, *g.plan_month(it.date))
+        g.register_result(page, dlg, p["seq"], it.date)
+        log(f"실적 등록: {_t(p)}")
 
 
 def _replace(page, dlg, it, old, kind, log, now):

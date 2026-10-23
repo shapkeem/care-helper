@@ -296,3 +296,11 @@ def test_write_upload_excel(tmp_path):
     assert list(rows[1]) == [20261018, "1000", "1030", "1000", "1030", "형순덕", 19420202, None,
                              "이미화", 19650506, "여", "1A102", "0002"]
     assert rows[2][3:5] == (None, None)  # 미래 일정은 실적 칸을 비운다
+
+
+def test_same_line_action_and_spaced_services(ip):
+    out = run(ip, "이미화\n장귀현 1000-1030 방문 일정등록\n장귀현 1400-1401 전화 일정 삭제\n장귀현 0900-0930 실적 등록")
+    assert [x.action for x in out] == ["일정등록", "삭제", "실적"]
+    out = run(ip, "이미화\n장귀현 1000-1030 보건 교육 일정등록\n장귀현 1100-1120 보건 입력\n김말순 1500-1520 건강 교육 입력")
+    assert [(x.kind, x.action, x.status) for x in out] == [("보건교육", "일정등록", "대기"), ("보건교육", "일정등록", "대기"),
+                                                           ("건강교육", "일정등록", "대기")]
