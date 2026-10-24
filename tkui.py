@@ -524,8 +524,15 @@ class TkUI:
         canvas.pack(side="left", fill="both", expand=True)
         inner = tk.Frame(canvas, bg=C_BG)
         wid = canvas.create_window((0, 0), window=inner, anchor="nw")
-        inner.bind("<Configure>", lambda e: canvas.configure(scrollregion=canvas.bbox("all")))
-        canvas.bind("<Configure>", lambda e: canvas.itemconfig(wid, width=e.width))
+        def region(_e=None):
+            # 내용이 칸보다 짧으면 스크롤 범위를 칸 높이로 맞춘다 (끌거나 휠을 돌려도 내용이 밀려 내려가지 않게)
+            x1, y1, x2, y2 = canvas.bbox("all") or (0, 0, 0, 0)
+            h = max(y2, canvas.winfo_height())
+            canvas.configure(scrollregion=(0, 0, x2, h))
+            if y2 <= canvas.winfo_height():
+                canvas.yview_moveto(0)
+        inner.bind("<Configure>", region)
+        canvas.bind("<Configure>", lambda e: (canvas.itemconfig(wid, width=e.width), region()))
         self.scrollers[str(canvas)] = canvas
         inner.canvas = canvas
         return wrap, inner
