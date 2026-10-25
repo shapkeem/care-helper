@@ -14,7 +14,7 @@
 - `SKILL.md`: 부르는 말(별칭), 일하는 순서, 안전 규칙
 - `references/goodeos-사이트구조.md`, `references/s-care-사이트구조.md`: 개인정보를 가린 구조 지도
 - `references/노하우.md`: 페이지 20건, 대상자이력현황 기준일 조회, s-care 상담지에는 pvplId 필요, 백업 시간 0~4시, s-care가 정보의 기준 등
-- `scripts/site.py`: 크롬 연결(goodeos 9222 자동 로그인, s-care 9223), `read`(조회 POST/GET), `write`(확인 토큰이 있어야만 보냄, 기록 남김), `page`(화면 열어 HTML 읽기)
+- `scripts/site_tool.py`: 크롬 연결(goodeos 9222 자동 로그인, s-care 9223), `read`(조회 POST/GET), `write`(확인 토큰이 있어야만 보냄, 기록 남김), `page`(화면 열어 HTML 읽기)
 - `scripts/setup.ps1`: 파이썬·playwright 설치 확인
 - `config/계정.json`: goodeos 공용 아이디·비밀번호 (공개 저장소에 넣지 않음)
 
