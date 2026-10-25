@@ -243,7 +243,7 @@ class Api:
                 _dst, total, ok, failed, del_src, del_out = pc.run_conversion(
                     log, roster, workers,
                     on_progress=lambda d, t: self._emit("conv_progress", {"done": d, "total": t}),
-                    review_callback=self._conv_review)
+                    review_callback=self._conv_review, error_callback=self._conv_errors)
                 self._conv_del = (del_src, del_out)
                 log("")
                 log(f"총 {total}개 중 {ok}개 성공, {len(failed)}개 실패.")
@@ -270,6 +270,18 @@ class Api:
                                     "suggested": p.suggested_disp, "reason": p.reason} for p in proposals])
         self._review_ev.wait()
         return self._review_result
+
+    def _conv_errors(self, files):
+        """오류 파일을 화면에 띄우고 파일마다 합칠지(오류 줄은 지움) 따로 뺄지 답({id: "merge"|"separate"})을 기다린다."""
+        self._err_ev = threading.Event()
+        self._err_result = {}
+        self._emit("conv_errors", files)
+        self._err_ev.wait()
+        return self._err_result
+
+    def conv_errors_done(self, result):
+        self._err_result = {int(k): v for k, v in (result or {}).items()}
+        self._err_ev.set()
 
     def conv_check_value(self, pid, text):
         """수정값을 직접 고쳤을 때 형식 확인. 문제 없으면 None, 있으면 이유."""

@@ -1025,6 +1025,7 @@ class TkUI:
         self.c_bar = ttk.Progressbar(p, style="Thin.Horizontal.TProgressbar", maximum=100)
         self.c_bar.pack(fill="x", pady=(4, 8))
         self.c_review = self.build_review(p)
+        self.c_errs = self.build_errors(p)
         self.c_done = RoundPanel(p, "#DCFCE7")
         self.label(self.c_done.inner, "변환이 끝났어요. 다 확인했으면 원본과 결과를 정리할 수 있어요.", 9, fg="#166534",
                    bg="#DCFCE7").pack(side="left")
@@ -1183,6 +1184,67 @@ class TkUI:
         if messagebox.askyesno(self.app.APP_NAME, "모든 수정 제안을 건너뛰고 원래 값 그대로 변환할까요?"):
             self.c_review.pack_forget()
             self.api.conv_review_done({})
+
+    # 오류 파일: 합칠지 따로 뺄지
+    def build_errors(self, p):
+        box = tk.Frame(p, bg=C_BG, highlightbackground="#FCA5A5", highlightthickness=2, padx=10, pady=8)
+        top = tk.Frame(box, bg=C_BG)
+        top.pack(fill="x")
+        self.label(top, "오류가 있는 파일", 11, True).pack(side="left")
+        self.label(top, "  합치면 오류 줄은 지우고 나머지만 통합본에 넣어요. 따로 빼면 파일째 '오류(이름)'으로 남겨요.",
+                   9, fg=C_MUTED).pack(side="left")
+        wrap, self.er_list = self.scroll_list(box, height=240)
+        wrap.pack(fill="both", expand=True, pady=6)
+        foot = tk.Frame(box, bg=C_BG)
+        foot.pack(fill="x")
+        self.er_count = self.label(foot, "", 9, fg=C_MUTED)
+        self.er_count.pack(side="left")
+        self.button(foot, "고른 대로 계속", self.er_apply, primary=True, small=True).pack(side="right")
+        self.button(foot, "모두 합치기", lambda: self.er_set_all("merge"), small=True).pack(side="right", padx=(0, 6))
+        self.button(foot, "모두 따로 빼기", lambda: self.er_set_all("separate"), small=True).pack(side="right", padx=(0, 6))
+        return box
+
+    def er_show(self, files):
+        self.er = {"files": files, "pick": {}, "btns": {}}
+        self.clear(self.er_list)
+        for f in files:
+            head = tk.Frame(self.er_list, bg=C_CARD, padx=8, pady=4)
+            head.pack(fill="x", pady=(6, 0))
+            self.label(head, f"{f['worker']}  ·  오류 {len(f['errors'])}건", 9, True, bg=C_CARD).pack(side="left")
+            self.label(head, f"  {f['file']}", 8, fg=C_MUTED, bg=C_CARD).pack(side="left")
+            sep = self.RB(head, "따로 빼기", lambda k=f["id"]: self.er_pick(k, "separate"), height=26, padx=10, size=8,
+                          bg=C_CARD)
+            sep.pack(side="right")
+            mer = None
+            if f["can_merge"]:
+                mer = self.RB(head, "오류 줄 지우고 합치기", lambda k=f["id"]: self.er_pick(k, "merge"), height=26,
+                              padx=10, size=8, bg=C_CARD)
+                mer.pack(side="right", padx=(0, 6))
+            self.er["btns"][f["id"]] = (mer, sep)
+            for e in f["errors"]:
+                self.label(self.er_list, "   " + e, 9, fg=C_DANGER, wraplength=760).pack(fill="x", padx=8)
+            self.er_pick(f["id"], "separate")
+        self.c_errs.pack(fill="both", expand=True, pady=(0, 8), before=self.c_log)
+        self.c_set(f"오류가 있는 파일 {len(files)}개: 합칠지 따로 뺄지 골라 주세요.")
+
+    def er_pick(self, k, how):
+        mer, sep = self.er["btns"][k]
+        if how == "merge" and mer is None:
+            return
+        self.er["pick"][k] = how
+        if mer is not None:
+            self.set_kind(mer, how == "merge")
+        self.set_kind(sep, how == "separate")
+        n = sum(1 for v in self.er["pick"].values() if v == "merge")
+        self.er_count.configure(text=f"합치기 {n}개 / 따로 빼기 {len(self.er['pick']) - n}개")
+
+    def er_set_all(self, how):
+        for f in self.er["files"]:
+            self.er_pick(f["id"], how)
+
+    def er_apply(self):
+        self.c_errs.pack_forget()
+        self.api.conv_errors_done(dict(self.er["pick"]))
 
     # ---------------------------------------------------------------- 서비스 제공계획 입력 (s-care)
     def build_scare(self):
@@ -1412,9 +1474,12 @@ class TkUI:
                 self.c_set(f"처리 중... ({d['done']}/{d['total']})")
         elif ev == "conv_review":
             self.rv_show(d)
+        elif ev == "conv_errors":
+            self.er_show(d)
         elif ev == "conv_done":
             self.c_start.set_enabled(True)
             self.c_review.pack_forget()
+            self.c_errs.pack_forget()
             if d.get("error"):
                 self.c_set("오류로 멈췄어요: " + d["error"], True)
             else:

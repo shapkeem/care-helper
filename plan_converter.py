@@ -6,6 +6,7 @@
   생활지원사 생년월일 검증은 goodeos 에서 받은 지원사 명단으로 한다.
 """
 import calendar
+import hashlib
 import html
 import os
 import re
@@ -527,6 +528,8 @@ COL_VENDOR = 12
 END_CHECK_SKIP_COLS = {COL_A_START, COL_A_END}
 
 GROUP_COLUMN_NAME = "관리구분"  # 대상자리스트 '이용정보' 아래 칸, 값은 일반/중점
+PERIOD_COLUMNS = ("시작일자", "종료일자")  # 같은 '이용정보' 아래 칸: 서비스 기간 (기간 밖 날짜는 goodeos가 '대상자없음'으로 거절)
+SUB_COLUMNS = (GROUP_COLUMN_NAME,) + PERIOD_COLUMNS
 GENERAL_GROUP_FORBIDDEN_CODES = {"43202": "청소관리"}  # 일반군에 넣으면 안 되는 서비스코드
 
 def _is_blank(v):
@@ -618,8 +621,9 @@ def load_beneficiary_list(path, log=None):
                 if not re.search(r'rowspan\s*=\s*["\']?2', attrs, re.I):
                     for k in range(span):
                         if sub_i < len(sub_names):
-                            if sub_names[sub_i] == GROUP_COLUMN_NAME and GROUP_COLUMN_NAME not in col_idx:
-                                col_idx[GROUP_COLUMN_NAME] = real_idx + k
+                            sub = sub_names[sub_i]
+                            if sub in SUB_COLUMNS and sub not in col_idx:
+                                col_idx[sub] = real_idx + k
                             sub_i += 1
                 real_idx += span
     else:
@@ -628,8 +632,9 @@ def load_beneficiary_list(path, log=None):
             if key in header_cells:
                 col_idx[key] = header_cells.index(key)
         for cells in rows[header_row_i:header_row_i + 2]:
-            if GROUP_COLUMN_NAME in cells and GROUP_COLUMN_NAME not in col_idx:
-                col_idx[GROUP_COLUMN_NAME] = cells.index(GROUP_COLUMN_NAME)
+            for sub in SUB_COLUMNS:
+                if sub in cells and sub not in col_idx:
+                    col_idx[sub] = cells.index(sub)
 
     if "성명" not in col_idx:
         raise RuntimeError(f"'{path.name}'에서 성명 열의 실제 위치를 계산하지 못했습니다.")
@@ -666,6 +671,9 @@ def load_beneficiary_list(path, log=None):
             "worker": cells[col_idx["생활지원사"]].strip() if "생활지원사" in col_idx and len(cells) > col_idx["생활지원사"] else "",
             "group": cells[col_idx[GROUP_COLUMN_NAME]].strip() if GROUP_COLUMN_NAME in col_idx and len(cells) > col_idx[GROUP_COLUMN_NAME] else "",
         }
+        for key, col in (("start", "시작일자"), ("end", "종료일자")):
+            d = re.sub(r"\D", "", cells[col_idx[col]]) if col in col_idx and len(cells) > col_idx[col] else ""
+            entry[key] = int(d[:8]) if len(d) >= 8 else None
         index.setdefault(name, []).append(entry)
 
     if not index:
@@ -789,9 +797,9 @@ def normalize_vendor_code(v):
     if isinstance(v, float) and v.is_integer():
         v = int(v)
     s = str(v).strip()
-    if s.isdigit():
+    if s.isdigit() and len(s) <= 4:
         return s.zfill(4)
-    return s
+    return DEFAULT_VENDOR_CODE  # 서비스코드(34202 등)를 잘못 넣은 경우: goodeos가 '거래처코드오류'로 거절
 
 
 def _display_value(v):
@@ -926,6 +934,7 @@ class FileJob:
         self.load_error = None
         self.dropped_rows = {}
         self.genderless_workers = set()
+        self.row_entries = {}  # 줄 → 대상자리스트에서 찾은 대상자
 
     @property
     def worker_name(self):
@@ -1032,7 +1041,8 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
         elif vendor_fixed != _norm_str(vv):
             old_disp = _display_value(vv)
             row[COL_VENDOR] = vendor_fixed
-            job.auto_fixes.append(f"{rlabel}행 거래처코드 '{old_disp}'→'{vendor_fixed}' 자동 보정 (4자리로 통일)")
+            why = "4자리로 통일" if _norm_str(vv).isdigit() and len(_norm_str(vv)) <= 4 else "거래처코드가 아니라서 기본값으로"
+            job.auto_fixes.append(f"{rlabel}행 거래처코드 '{old_disp}'→'{vendor_fixed}' 자동 보정 ({why})")
 
         if _is_blank(row[COL_WORKER]):
             job.errors.append(f"{rlabel}행 생활지원사명이 비어있음")
@@ -1213,6 +1223,7 @@ def _cross_check_beneficiaries(job: FileJob, beneficiaries):
                     grid[i][COL_NAME] = fixed
                     job.auto_fixes.append(
                         f"{rlabel}행 대상자명 '{raw_name}'→'{fixed}' (리스트 대조: 생년월일·지원사 일치)")
+                job.row_entries[i] = candidates[0]
                 _check_group_service_code(job, rlabel, fixed, candidates[0], row)
             else:
                 job.errors.append(f"{rlabel}행 대상자 '{raw_name}' 대상자리스트에 없음")
@@ -1231,6 +1242,7 @@ def _cross_check_beneficiaries(job: FileJob, beneficiaries):
                 continue
 
         entry = matched[0]
+        job.row_entries[i] = entry
         display_name = entry.get("display_name", entry["name"])
         if display_name != raw_name:
             grid[i][COL_NAME] = display_name
@@ -1495,9 +1507,75 @@ def _log_final_summary(jobs, log):
             _log_file_block(log, "[줄 삭제]", j.worker_name, list(j.dropped_rows.values()))
 
 
-def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_callback=None):
+def _drop_same_files(files, log):
+    """카톡에서 두 번 받아 '(1)'이 붙은 것처럼 내용이 똑같은 파일은 하나만 쓴다 (두 번 올라가 일정이 겹치지 않게)."""
+    seen, kept = {}, []
+    for f in files:
+        key = hashlib.sha256(f.read_bytes()).hexdigest()
+        if key in seen:
+            log(f"[같은 파일] '{f.name}'은(는) '{seen[key].name}'과(와) 내용이 똑같아서 빼고 하나만 변환해요.")
+            continue
+        seen[key] = f
+        kept.append(f)
+    return kept
+
+
+def _row_date(job, i, approved):
+    """보정까지 반영한 그 줄의 서비스일자(YYYYMMDD)."""
+    for p in job.proposals:
+        if (i, COL_DATE) in p.cells and p.pid in approved:
+            return normalize_date_value(approved[p.pid])
+    return normalize_date_value(job.grid[i][COL_DATE])
+
+
+def _check_service_period(job, approved):
+    """대상자리스트의 서비스 기간(시작일자~종료일자) 밖 날짜는 goodeos가 '대상자없음'으로 거절하니 미리 오류로."""
+    for i, entry in job.row_entries.items():
+        d = _row_date(job, i, approved)
+        start, end = entry.get("start"), entry.get("end")
+        if d is None or i in job.dropped_rows:
+            continue
+        if (end and d > end) or (start and d < start):
+            fmt = lambda n: f"{n // 10000}-{n // 100 % 100:02d}-{n % 100:02d}" if n else "?"
+            job.errors.append(f"{job.row_nums[i]}행 {entry.get('display_name', entry['name'])} {fmt(d)} 일정이 서비스 기간"
+                              f"({fmt(start)}~{fmt(end)}) 밖이에요 (goodeos가 '대상자없음'으로 거절)")
+
+
+def _error_rows(job):
+    """오류 문구의 'N행' → 그 줄 번호들. 줄을 못 찾는 오류가 있으면 None (줄만 빼고 합칠 수 없음)."""
+    idx = {n: i for i, n in enumerate(job.row_nums)}
+    rows = {}
+    for msg in job.errors:
+        n, _text = _split_row(msg)
+        if n not in idx:
+            return None
+        rows.setdefault(idx[n], []).append(msg)
+    return rows
+
+
+def _ask_error_files(jobs, error_callback, log):
+    """오류가 있는 파일마다 '오류 줄만 빼고 합칠지 / 파일째 따로 뺄지' 물어 그대로 한다.
+    error_callback([{id, file, worker, errors, can_merge}]) → {id: "merge" | "separate"}. 없으면 따로 뺀다."""
+    error_jobs = [j for j in jobs if j.errors]
+    if not error_jobs or error_callback is None:
+        return
+    asks = [{"id": k, "file": j.src_path.name, "worker": j.worker_name, "errors": list(j.errors),
+             "can_merge": _error_rows(j) is not None} for k, j in enumerate(error_jobs)]
+    answer = error_callback(asks) or {}
+    for k, j in enumerate(error_jobs):
+        rows = _error_rows(j)
+        if answer.get(k) != "merge" or rows is None:
+            continue
+        for i, msgs in rows.items():
+            j.dropped_rows[i] = " / ".join(msgs)
+        log(f"[합침] {j.worker_name}: 오류 {len(j.errors)}건이 있는 {len(rows)}줄만 빼고 통합본에 넣어요.")
+        j.errors = []
+
+
+def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_callback=None, error_callback=None):
     """roster_path: 대상자리스트 파일 (None 이면 대상자 확인 생략).
-    worker_data: {지원사 이름: {"birth": YYYYMMDD}} (없으면 지원사 생년월일 확인 생략)"""
+    worker_data: {지원사 이름: {"birth": YYYYMMDD}} (없으면 지원사 생년월일 확인 생략)
+    error_callback: 오류 파일을 합칠지 따로 뺄지 묻는 함수 (_ask_error_files 참고)"""
     source_folder, target_folder = work_folders()
     beneficiaries = None
     if roster_path:
@@ -1510,7 +1588,7 @@ def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_
     if worker_data:
         log(f"생활지원사 명단 {len(worker_data)}명 (goodeos)")
 
-    src_files = find_source_excels(source_folder)
+    src_files = _drop_same_files(find_source_excels(source_folder), log)
     total = len(src_files)
     log(f"대상 파일 {total}개 발견")
     if on_progress:
@@ -1546,6 +1624,11 @@ def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_
         if review_callback is None:
             review_callback = auto_approve_all
         approved.update(review_callback(to_review) or {})
+
+    # 서비스 기간은 날짜 보정이 끝난 뒤에 본다 (연도 보정 전 날짜로 보면 틀림)
+    for job in jobs:
+        _check_service_period(job, approved)
+    _ask_error_files(jobs, error_callback, log)
 
     success_count = 0
     applied_count = 0
