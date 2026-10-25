@@ -1191,7 +1191,7 @@ class TkUI:
         top = tk.Frame(box, bg=C_BG)
         top.pack(fill="x")
         self.label(top, "오류가 있는 파일", 11, True).pack(side="left")
-        self.label(top, "  합치면 오류 줄은 지우고 나머지만 통합본에 넣어요. 따로 빼면 파일째 '오류(이름)'으로 남겨요.",
+        self.label(top, "  칸에 맞는 값을 넣으면 고쳐서 넣어요. 못 고친 줄은 합치면 지우고, 따로 빼면 파일째 '오류(이름)'으로 남겨요.",
                    9, fg=C_MUTED).pack(side="left")
         wrap, self.er_list = self.scroll_list(box, height=240)
         wrap.pack(fill="both", expand=True, pady=6)
@@ -1205,7 +1205,7 @@ class TkUI:
         return box
 
     def er_show(self, files):
-        self.er = {"files": files, "pick": {}, "btns": {}}
+        self.er = {"files": files, "pick": {}, "btns": {}, "fields": {}}
         self.clear(self.er_list)
         for f in files:
             head = tk.Frame(self.er_list, bg=C_CARD, padx=8, pady=4)
@@ -1221,11 +1221,19 @@ class TkUI:
                               padx=10, size=8, bg=C_CARD)
                 mer.pack(side="right", padx=(0, 6))
             self.er["btns"][f["id"]] = (mer, sep)
-            for e in f["errors"]:
-                self.label(self.er_list, "   " + e, 9, fg=C_DANGER, wraplength=760).pack(fill="x", padx=8)
+            for n, e in enumerate(f["errors"]):
+                line = tk.Frame(self.er_list, bg=C_BG, padx=8, pady=2)
+                line.pack(fill="x")
+                if e["field"]:  # 고칠 수 있는 오류: 오른쪽에 새 값 칸
+                    cf = CellField(line, self.F(9), e["choices"])
+                    cf.configure(width=170)
+                    cf.pack(side="right")
+                    self.label(line, f"{e['field']} 고치기 (지금 '{e['value']}')", 8, fg=C_MUTED).pack(side="right", padx=(8, 6))
+                    self.er["fields"][(f["id"], n)] = cf
+                self.label(line, e["text"], 9, fg=C_DANGER, wraplength=560).pack(side="left", fill="x", expand=True)
             self.er_pick(f["id"], "separate")
         self.c_errs.pack(fill="both", expand=True, pady=(0, 8), before=self.c_log)
-        self.c_set(f"오류가 있는 파일 {len(files)}개: 합칠지 따로 뺄지 골라 주세요.")
+        self.c_set(f"오류가 있는 파일 {len(files)}개: 고치거나, 합칠지 따로 뺄지 골라 주세요.")
 
     def er_pick(self, k, how):
         mer, sep = self.er["btns"][k]
@@ -1243,8 +1251,21 @@ class TkUI:
             self.er_pick(f["id"], how)
 
     def er_apply(self):
+        answer = {k: {"how": how, "fixes": {}} for k, how in self.er["pick"].items()}
+        bad = []
+        for (k, n), cf in self.er["fields"].items():
+            text = cf.get().strip()
+            problem = self.api.conv_check_fix(k, n, text) if text else None
+            cf.warn(bool(problem))
+            if problem:
+                bad.append(problem)
+            elif text:
+                answer[k]["fixes"][n] = text
+        if bad:
+            messagebox.showwarning(self.app.APP_NAME, "노란 칸의 값을 확인해 주세요.\n\n" + "\n".join(bad[:8]))
+            return
         self.c_errs.pack_forget()
-        self.api.conv_errors_done(dict(self.er["pick"]))
+        self.api.conv_errors_done(answer)
 
     # ---------------------------------------------------------------- 서비스 제공계획 입력 (s-care)
     def build_scare(self):

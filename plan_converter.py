@@ -935,6 +935,13 @@ class FileJob:
         self.dropped_rows = {}
         self.genderless_workers = set()
         self.row_entries = {}  # 줄 → 대상자리스트에서 찾은 대상자
+        self.error_cells = {}  # 오류 문구 → (줄, 칸): 화면에서 그 칸을 고칠 수 있게
+        self.beneficiaries = None
+        self.worker_data = None
+
+    def error(self, i, col, msg):
+        self.errors.append(msg)
+        self.error_cells[msg] = (i, col)
 
     @property
     def worker_name(self):
@@ -1045,12 +1052,12 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
             job.auto_fixes.append(f"{rlabel}행 거래처코드 '{old_disp}'→'{vendor_fixed}' 자동 보정 ({why})")
 
         if _is_blank(row[COL_WORKER]):
-            job.errors.append(f"{rlabel}행 생활지원사명이 비어있음")
+            job.error(i, COL_WORKER, f"{rlabel}행 생활지원사명이 비어있음")
 
         if not cleaned:
-            job.errors.append(f"{rlabel}행 서비스코드 없음")
+            job.error(i, COL_CODE, f"{rlabel}행 서비스코드 없음")
         elif cleaned not in SERVICE_CODES:
-            job.errors.append(f"{rlabel}행 서비스코드 '{cleaned}' 코드표에 없음")
+            job.error(i, COL_CODE, f"{rlabel}행 서비스코드 '{cleaned}' 코드표에 없음")
 
         if cleaned and cleaned not in PHONE_CODES:
             s = normalize_time_value(row[COL_START])
@@ -1062,8 +1069,8 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
                     job.dropped_rows[i] = (
                         f"{rlabel}행 {person} {cleaned}({kind_name}) 계획시간이 {duration}분으로 {MIN_MINUTES}분 미만임")
                 elif cleaned in EDU_CODES and 0 < duration < EDU_MIN_MINUTES:
-                    job.errors.append(
-                        f"{rlabel}행 {person} {cleaned}({EDU_CODES[cleaned]}) 계획시간이 {duration}분으로 "
+                    job.error(
+                        i, COL_END, f"{rlabel}행 {person} {cleaned}({EDU_CODES[cleaned]}) 계획시간이 {duration}분으로 "
                         f"{EDU_MIN_MINUTES}분 미만임")
 
     if silent_count:
@@ -1226,7 +1233,7 @@ def _cross_check_beneficiaries(job: FileJob, beneficiaries):
                 job.row_entries[i] = candidates[0]
                 _check_group_service_code(job, rlabel, fixed, candidates[0], row)
             else:
-                job.errors.append(f"{rlabel}행 대상자 '{raw_name}' 대상자리스트에 없음")
+                job.error(i, COL_NAME, f"{rlabel}행 대상자 '{raw_name}' 대상자리스트에 없음")
             continue
 
         matched = [e for e in entries if birth is not None and e["birth"] == birth]
@@ -1273,8 +1280,8 @@ def _check_group_service_code(job: FileJob, rlabel, name, entry, row):
         return
     code = clean_service_code(row[COL_CODE])
     if code in GENERAL_GROUP_FORBIDDEN_CODES:
-        job.errors.append(
-            f"{rlabel}행 {name} 일반군인데 서비스코드 {code}({GENERAL_GROUP_FORBIDDEN_CODES[code]})가 들어감")
+        job.error(job.row_nums.index(rlabel), COL_CODE,
+                  f"{rlabel}행 {name} 일반군인데 서비스코드 {code}({GENERAL_GROUP_FORBIDDEN_CODES[code]})가 들어감")
 
 
 def _cross_check_workers(job: FileJob, worker_data):
@@ -1537,8 +1544,8 @@ def _check_service_period(job, approved):
             continue
         if (end and d > end) or (start and d < start):
             fmt = lambda n: f"{n // 10000}-{n // 100 % 100:02d}-{n % 100:02d}" if n else "?"
-            job.errors.append(f"{job.row_nums[i]}행 {entry.get('display_name', entry['name'])} {fmt(d)} 일정이 서비스 기간"
-                              f"({fmt(start)}~{fmt(end)}) 밖이에요 (goodeos가 '대상자없음'으로 거절)")
+            job.error(i, COL_DATE, f"{job.row_nums[i]}행 {entry.get('display_name', entry['name'])} {fmt(d)} 일정이 "
+                                   f"서비스 기간({fmt(start)}~{fmt(end)}) 밖이에요 (goodeos가 '대상자없음'으로 거절)")
 
 
 def _error_rows(job):
@@ -1553,22 +1560,149 @@ def _error_rows(job):
     return rows
 
 
+FIX_FIELDS = {COL_CODE: "서비스코드", COL_NAME: "대상자", COL_DATE: "서비스일자", COL_END: "종료시간",
+              COL_WORKER: "생활지원사"}
+
+
+def _fix_choices(job, col):
+    """고칠 칸의 고르기 목록 (없으면 직접 입력)."""
+    if col == COL_CODE:
+        return [f"{c} {n}" for c, n in SERVICE_CODES.items()]
+    if col == COL_NAME and job.beneficiaries:
+        worker = job.worker_name
+        return sorted(e.get("display_name", e["name"]) for group in job.beneficiaries.values() for e in group
+                      if e["worker"] == worker)
+    if col == COL_WORKER and job.worker_data:
+        return sorted(job.worker_data)
+    return None
+
+
+def check_fix(job, i, col, text):
+    """오류 칸에 새로 넣은 값 확인 → (문제, {칸: 값}). 문제가 없으면 (None, 바꿀 값들)."""
+    text = (text or "").strip()
+    first = text.split()[0] if text else ""
+    row = job.grid[i]
+    if not first:
+        return "값을 넣어 주세요.", {}
+    if col == COL_CODE:
+        code = clean_service_code(first)
+        if code not in SERVICE_CODES:
+            return f"서비스코드 '{code}'는 코드표에 없어요.", {}
+        entry = job.row_entries.get(i)
+        if entry and entry.get("group", "").startswith("일반") and code in GENERAL_GROUP_FORBIDDEN_CODES:
+            return f"일반군 어르신에게는 {code}({GENERAL_GROUP_FORBIDDEN_CODES[code]})를 넣을 수 없어요.", {}
+        return None, {COL_CODE: code}
+    if col == COL_NAME:
+        entries = [e for group in (job.beneficiaries or {}).values() for e in group
+                   if first in (e.get("display_name"), e["name"])]
+        exact = [e for e in entries if e.get("display_name") == first]
+        if len(exact) == 1:
+            entries = exact
+        if not entries:
+            return f"'{first}' 어르신이 대상자리스트에 없어요.", {}
+        if len(entries) > 1:
+            return f"'{first}' 동명이인이 있어요. 목록에서 A/B가 붙은 이름으로 골라 주세요.", {}
+        e = entries[0]
+        problem = _period_problem(e, normalize_date_value(row[COL_DATE]))
+        if problem:
+            return problem, {}
+        return None, {COL_NAME: e.get("display_name", e["name"]), COL_BIRTH: e["birth"], COL_GENDER: e["gender"] or row[COL_GENDER],
+                      "entry": e}
+    if col == COL_DATE:
+        d = normalize_date_value(first)
+        if d is None or len(str(d)) != 8:
+            return "날짜는 20261027처럼 넣어 주세요.", {}
+        try:
+            datetime.date(d // 10000, d // 100 % 100, d % 100)
+        except ValueError:
+            return f"{d}는 달력에 없는 날짜예요.", {}
+        problem = _period_problem(job.row_entries.get(i), d)
+        return (problem, {}) if problem else (None, {COL_DATE: d})
+    if col == COL_END:
+        t, s = normalize_time_value(first), normalize_time_value(row[COL_START])
+        if t is None:
+            return "시간은 1430처럼 넣어 주세요.", {}
+        need = EDU_MIN_MINUTES if clean_service_code(row[COL_CODE]) in EDU_CODES else MIN_MINUTES
+        if s is not None and time_to_minutes(t) - time_to_minutes(s) < need:
+            return f"시작({s})부터 {need}분 이상이어야 해요.", {}
+        return None, {COL_END: t}
+    if col == COL_WORKER:
+        if job.worker_data and first not in job.worker_data:
+            return f"'{first}' 선생님이 생활지원사 명단에 없어요.", {}
+        return None, {COL_WORKER: first}
+    return "이 오류는 고칠 수 없어요.", {}
+
+
+def _period_problem(entry, d):
+    if not entry or d is None:
+        return None
+    start, end = entry.get("start"), entry.get("end")
+    if (end and d > end) or (start and d < start):
+        fmt = lambda n: f"{n // 10000}-{n // 100 % 100:02d}-{n % 100:02d}" if n else "?"
+        return f"{fmt(d)}은(는) 서비스 기간({fmt(start)}~{fmt(end)}) 밖이에요."
+    return None
+
+
+def _apply_fix(job, msg, text, log):
+    i, col = job.error_cells[msg]
+    problem, values = check_fix(job, i, col, text)
+    if problem:
+        log(f"  [수정 안 됨] {msg}: {problem}")
+        return False
+    entry = values.pop("entry", None)
+    if entry:
+        job.row_entries[i] = entry
+    old = _display_value(job.grid[i][col])
+    for c, v in values.items():
+        job.grid[i][c] = v
+    # 같은 칸을 바꾸는 수정 제안이 뒤에서 덮어쓰지 않게
+    job.proposals = [p for p in job.proposals if not any((i, c) in p.cells for c in values)]
+    job.errors.remove(msg)
+    log(f"[수정] {job.worker_name} {job.row_nums[i]}행 {FIX_FIELDS[col]} '{old}' → '{values[col]}'")
+    return True
+
+
 def _ask_error_files(jobs, error_callback, log):
-    """오류가 있는 파일마다 '오류 줄만 빼고 합칠지 / 파일째 따로 뺄지' 물어 그대로 한다.
-    error_callback([{id, file, worker, errors, can_merge}]) → {id: "merge" | "separate"}. 없으면 따로 뺀다."""
+    """오류가 있는 파일마다 고칠 값을 받거나, '오류 줄만 지우고 합칠지 / 파일째 따로 뺄지' 물어 그대로 한다.
+    error_callback(asks, check) → {id: {"how": "merge"|"separate", "fixes": {오류 번호: 새 값}}} ("merge" 처럼 문자열만 줘도 됨).
+    asks: [{id, file, worker, can_merge, errors: [{text, field, value, choices}]}], check(id, 오류 번호, 값) → 문제 또는 None.
+    error_callback 이 없으면 지금처럼 따로 뺀다."""
     error_jobs = [j for j in jobs if j.errors]
     if not error_jobs or error_callback is None:
         return
-    asks = [{"id": k, "file": j.src_path.name, "worker": j.worker_name, "errors": list(j.errors),
-             "can_merge": _error_rows(j) is not None} for k, j in enumerate(error_jobs)]
-    answer = error_callback(asks) or {}
+    msgs = [list(j.errors) for j in error_jobs]
+    asks = []
     for k, j in enumerate(error_jobs):
-        rows = _error_rows(j)
-        if answer.get(k) != "merge" or rows is None:
+        errs = []
+        for m in msgs[k]:
+            i, col = j.error_cells.get(m, (None, None))
+            fixable = col in FIX_FIELDS
+            errs.append({"text": m, "field": FIX_FIELDS.get(col) if fixable else None,
+                         "value": _display_value(j.grid[i][col]) if fixable else "",
+                         "choices": _fix_choices(j, col) if fixable else None})
+        asks.append({"id": k, "file": j.src_path.name, "worker": j.worker_name, "errors": errs,
+                     "can_merge": _error_rows(j) is not None})
+
+    def check(k, e, text):
+        j = error_jobs[int(k)]
+        i, col = j.error_cells[msgs[int(k)][int(e)]]
+        return check_fix(j, i, col, text)[0]
+
+    answer = error_callback(asks, check) or {}
+    for k, j in enumerate(error_jobs):
+        a = answer.get(k, "separate")
+        a = {"how": a} if isinstance(a, str) else a
+        for e, text in (a.get("fixes") or {}).items():
+            _apply_fix(j, msgs[k][int(e)], text, log)
+        if not j.errors:
+            log(f"[수정 완료] {j.worker_name}: 오류를 다 고쳐서 통합본에 넣어요.")
             continue
-        for i, msgs in rows.items():
-            j.dropped_rows[i] = " / ".join(msgs)
-        log(f"[합침] {j.worker_name}: 오류 {len(j.errors)}건이 있는 {len(rows)}줄만 빼고 통합본에 넣어요.")
+        rows = _error_rows(j)
+        if a.get("how") != "merge" or rows is None:
+            continue
+        for i, ms in rows.items():
+            j.dropped_rows[i] = " / ".join(ms)
+        log(f"[합침] {j.worker_name}: 오류 {len(j.errors)}건이 있는 {len(rows)}줄만 지우고 통합본에 넣어요.")
         j.errors = []
 
 
@@ -1627,6 +1761,7 @@ def run_conversion(log, roster_path, worker_data=None, on_progress=None, review_
 
     # 서비스 기간은 날짜 보정이 끝난 뒤에 본다 (연도 보정 전 날짜로 보면 틀림)
     for job in jobs:
+        job.beneficiaries, job.worker_data = beneficiaries, worker_data
         _check_service_period(job, approved)
     _ask_error_files(jobs, error_callback, log)
 

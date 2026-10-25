@@ -55,12 +55,12 @@ def test_service_period_uses_corrected_date():
 
 def test_error_files_merge_drops_only_error_rows():
     a = _job([_row(20261026), _row(20261027)])
-    a.errors = ["3행 최종화 2026-10-27 일정이 서비스 기간(2026-10-12~2026-10-26) 밖이에요"]
+    a.error(1, pc.COL_DATE, "3행 최종화 2026-10-27 일정이 서비스 기간(2026-10-12~2026-10-26) 밖이에요")
     b = _job([_row(20261026, "정묘연")])
-    b.errors = ["2행 대상자 '정묘연' 대상자리스트에 없음"]
+    b.error(0, pc.COL_NAME, "2행 대상자 '정묘연' 대상자리스트에 없음")
     asked = []
 
-    def ask(files):
+    def ask(files, _check):
         asked.extend(files)
         return {0: "merge", 1: "separate"}
 
@@ -74,7 +74,7 @@ def test_error_files_merge_drops_only_error_rows():
 def test_error_without_row_number_cannot_merge():
     job = _job([_row(20261026)])
     job.errors = ["파일 전체 오류"]
-    pc._ask_error_files([job], lambda files: {0: "merge"}, lambda m: None)
+    pc._ask_error_files([job], lambda files, check: {0: "merge"}, lambda m: None)
     assert job.errors == ["파일 전체 오류"]
 
 
@@ -83,3 +83,51 @@ def test_no_callback_keeps_old_behavior():
     job.errors = ["2행 서비스코드 '13202' 코드표에 없음"]
     pc._ask_error_files([job], None, lambda m: None)
     assert job.errors and not job.dropped_rows
+
+
+BEN = {"최종화": [{"name": "최종화", "display_name": "최종화", "birth": 19441217, "gender": "여", "worker": "나종순",
+                  "group": "일반", "start": 20261012, "end": 20261026}],
+       "김관문": [{"name": "김관문", "display_name": "김관문", "birth": 19400101, "gender": "남", "worker": "나종순",
+                  "group": "중점", "start": 20200101, "end": 29990101}]}
+
+
+def _fix_job(rows):
+    job = _job(rows)
+    job.beneficiaries, job.worker_data = BEN, {"나종순": {"birth": 19700101}}
+    return job
+
+
+def test_fix_service_code_then_file_is_merged_normally():
+    job = _fix_job([_row(20261026)])
+    job.grid[0][pc.COL_CODE] = "13202"
+    job.error(0, pc.COL_CODE, "2행 서비스코드 '13202' 코드표에 없음")
+    seen = {}
+
+    def ask(files, check):
+        seen.update(files[0]["errors"][0])
+        assert check(0, 0, "99999") and check(0, 0, "43202 청소관리") is None
+        return {0: {"how": "separate", "fixes": {0: "43202 청소관리"}}}
+
+    pc._ask_error_files([job], ask, lambda m: None)
+    assert seen["field"] == "서비스코드" and seen["value"] == "13202" and "43202 청소관리" in seen["choices"]
+    assert job.errors == [] and job.grid[0][pc.COL_CODE] == "43202" and not job.dropped_rows
+    assert not pc._output_base_name(job).startswith(pc.ERROR_FILE_PREFIX)
+
+
+def test_fix_elder_name_fills_birth_and_checks_period():
+    job = _fix_job([_row(20261027, "정묘연")])
+    job.error(0, pc.COL_NAME, "2행 대상자 '정묘연' 대상자리스트에 없음")
+    assert "서비스 기간" in pc.check_fix(job, 0, pc.COL_NAME, "최종화")[0]  # 10/26 에 끝난 어르신
+    assert pc.check_fix(job, 0, pc.COL_NAME, "없는사람")[0]
+    pc._ask_error_files([job], lambda f, c: {0: {"fixes": {0: "김관문"}}}, lambda m: None)
+    assert job.errors == [] and job.grid[0][pc.COL_NAME] == "김관문" and job.grid[0][pc.COL_BIRTH] == 19400101
+
+
+def test_fix_date_inside_period_and_bad_fix_keeps_error():
+    job = _fix_job([_row(20261027), _row(20261028)])
+    job.row_entries = {0: BEN["최종화"][0], 1: BEN["최종화"][0]}
+    pc._check_service_period(job, {})
+    assert len(job.errors) == 2
+    pc._ask_error_files([job], lambda f, c: {0: {"how": "merge", "fixes": {0: "20261026", 1: "20261031"}}}, lambda m: None)
+    assert job.grid[0][pc.COL_DATE] == 20261026
+    assert list(job.dropped_rows) == [1]  # 못 고친 줄은 합치면서 지움

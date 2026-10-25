@@ -271,13 +271,18 @@ class Api:
         self._review_ev.wait()
         return self._review_result
 
-    def _conv_errors(self, files):
-        """오류 파일을 화면에 띄우고 파일마다 합칠지(오류 줄은 지움) 따로 뺄지 답({id: "merge"|"separate"})을 기다린다."""
+    def _conv_errors(self, files, check):
+        """오류 파일을 화면에 띄우고, 고친 값과 파일마다 합칠지(오류 줄은 지움) 따로 뺄지 답을 기다린다."""
+        self._err_check = check
         self._err_ev = threading.Event()
         self._err_result = {}
         self._emit("conv_errors", files)
         self._err_ev.wait()
         return self._err_result
+
+    def conv_check_fix(self, fid, eidx, text):
+        """오류 칸에 고쳐 넣은 값 확인. 문제 없으면 None, 있으면 이유."""
+        return self._err_check(fid, eidx, text)
 
     def conv_errors_done(self, result):
         self._err_result = {int(k): v for k, v in (result or {}).items()}
