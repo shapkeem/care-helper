@@ -59,6 +59,7 @@ def find_action_words(text):
 REQUEST_RE = re.compile(r"부탁|해\s*주|주세요|바랍니다|요청")
 DUP_RE = re.compile(r"중복|두\s*번\s*들어")  # 중복 정리는 어느 것을 지울지 사람이 판단
 STATUS_BLOCK = {"종결", "장기부재", "타기관이전"}
+ALL_CLIENTS = "모두"  # 이름 없이 '실적 넣어주세요'만 왔을 때의 대상자: 그 지원사 그날 지난 일정 전부
 
 ACTIONS = {
     "실적": "Register the performance record (실적) for a care visit/call that should already be on the schedule. "
@@ -348,7 +349,8 @@ def base_name(n):
 
 NAME_STOP = set("""오늘 어제 내일 전화 방문 인지 청소 외출 수정 삭제 실적 일정 입력 부탁 변경 활동 관리 동행 코드 시간 실행
 미실행 어르신 어른신 선생님 생지사 주말 요일 감사 죄송 확인 오전 오후 입력부탁 수정부탁 실적부탁 프로그램 인지활동 청소관리
-외출동행 일반방문 업무 이름 취소 추가 해주세요 드립니다 합니다 부탁합니다 부탁드립니다 바랍니다 오류 중점 일반 둘다 위에""".split())
+외출동행 일반방문 업무 이름 취소 추가 해주세요 드립니다 합니다 부탁합니다 부탁드립니다 바랍니다 오류 중점 일반 둘다 위에
+대상자 대상지 대상자분 대상자님 모두 전체 전부 다들""".split())
 
 
 def find_names(text, clients):
@@ -485,6 +487,13 @@ class Interpreter:
         dates = find_dates(body, msg_date)
         kinds = find_kinds(body)
         if not names and not times:
+            acts = [a for _, a in find_action_words(body)]
+            if acts and acts[0] == "실적" and not {"수정", "삭제"} & set(acts):
+                # '대상지 실적 넣어주세요': 그 지원사 어르신 모두의 그날 지난 일정에 실적 (서비스를 적었으면 그 서비스만)
+                ks = {k for _, k in kinds}
+                return [Item(ic=ic, person=ALL_CLIENTS, date=d, kind=ks.pop() if len(ks) == 1 else "",
+                             action="실적", source=body)
+                        for d in sorted({d for _, d in dates} or {msg_date})]
             if not dates and not kinds:  # '다시 입력 부탁드립니다' 처럼 앞뒤 맥락이 없는 말
                 return [Item(ic=ic, source=body, action="기타", status="요청 아님", note="누구·언제인지 없는 말이에요")]
             return [Item(ic=ic, source=body, action="기타", status="사람 처리", note="대상자/시간을 찾지 못함")]

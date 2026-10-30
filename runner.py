@@ -3,6 +3,7 @@
 from datetime import datetime
 
 import goodeos_work as g
+import kakao
 from goodeos_work import WorkError
 
 
@@ -45,6 +46,10 @@ def run_item(page, dlg, it, ask, log, now=None):
     g.forget_screens(page)
     if not it.person:
         raise WorkError("대상자를 찾지 못했어요.")
+    if it.person == kakao.ALL_CLIENTS:
+        if it.action != "실적" or it.frm:
+            raise WorkError("'모두'는 시간 없는 실적만 처리해요.")
+        return _all_results(page, dlg, it, log, now)
     if it.action in ("실적", "일정등록"):
         return _ensure(page, dlg, it, ask, log, now)
     if it.action == "수정":
@@ -93,6 +98,19 @@ def _ensure(page, dlg, it, ask, log, now):
         g.open_result(page, it.person, it.ic, *g.plan_month(it.date))
         g.register_result(page, dlg, p["seq"], it.date)
         log(f"실적 등록: {_t(p)}")
+
+
+def _all_results(page, dlg, it, log, now):
+    """그 지원사의 그날 일정 전부 중 이미 끝났는데 실적이 없는 것에 실적을 넣는다 (서비스를 적었으면 그 서비스만)."""
+    ps = day_plans_all(page, it.ic, it.date)
+    c = [p for p in ps if not p["result"] and g.is_past(it.date, p["to"], now)
+         and (not it.kind or g.CODE_TO_KIND.get(p["code"]) == it.kind)]
+    if not c:
+        raise WorkError("실적이 없는 지난 일정이 없어요")
+    for p in sorted(c, key=lambda p: p["from"]):
+        g.open_result(page, p["person"], it.ic, *g.plan_month(it.date))
+        g.register_result(page, dlg, p["seq"], it.date)
+        log(f"실적 등록: {p['person']} {_t(p)}")
 
 
 def _replace(page, dlg, it, old, kind, log, now):

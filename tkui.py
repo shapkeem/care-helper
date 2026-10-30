@@ -906,7 +906,7 @@ class TkUI:
         """어르신 목록: 그 지원사 담당 어르신 먼저, 그다음 나머지 (다른 선생님 담당을 고르면 대직)."""
         ic = self.k_data[rid]["w"]["ic"].get()
         mine = sorted(self.k_meta["clients"].get(ic, []))
-        return mine + [n for n in self.k_meta["names"] if n not in set(mine)]
+        return mine + [n for n in self.k_meta["names"] if n not in set(mine)] + ["모두"]  # 모두: 시간 없는 실적만 (kakao.ALL_CLIENTS)
 
     def k_changed(self, rid):
         d = self.k_data.get(rid)
