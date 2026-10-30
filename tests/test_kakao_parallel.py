@@ -83,3 +83,10 @@ def test_review_rows_result_without_kind():
     assert kakao_job.row_problems(row, {"이미화"}, {"장귀현"}, today) == set()  # 시간 없는 실적은 서비스 비워도 됨
     assert kakao_job.row_problems(dict(row, time="1000~1100"), {"이미화"}, {"장귀현"}, today) == {"kind"}
     assert kakao_job.row_problems(dict(row, action="일정등록"), {"이미화"}, {"장귀현"}, today) == {"time", "kind"}
+
+
+def test_review_rows_delete_without_kind():
+    from datetime import date
+    row = {"id": 1, "ic": "이미화", "person": "장귀현", "date": "10/21", "time": "1212~1213", "kind": "",
+           "action": "삭제", "checked": True}
+    assert kakao_job.row_problems(row, {"이미화"}, {"장귀현"}, date(2026, 10, 21)) == set()

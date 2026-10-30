@@ -219,8 +219,9 @@ def row_problems(row, ics, names, today):
     no_time_ok = row.get("action") in ("실적", "삭제") or (row.get("action") == "수정" and row.get("kind") in g.SERVICES)
     if not parse_range(row.get("time")) and not (no_time_ok and not row.get("time")):
         bad.add("time")  # 실적·삭제는 시간을 비우면 그날 일정에서 찾는다
-    if row.get("kind") not in g.SERVICES and not (row.get("action") == "실적" and not row.get("time") and not row.get("kind")):
-        bad.add("kind")  # 시간 없는 실적은 서비스를 비우면 그날 일정 전부
+    no_kind_ok = row.get("action") == "삭제" or (row.get("action") == "실적" and not row.get("time"))
+    if row.get("kind") not in g.SERVICES and not (no_kind_ok and not row.get("kind")):
+        bad.add("kind")  # 삭제는 시간과 겹치는 일정, 시간 없는 실적은 그날 일정 전부라서 서비스를 비워도 된다
     if row.get("action") not in ACTIONS_RUN:
         bad.add("action")
     return bad

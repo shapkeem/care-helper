@@ -370,3 +370,11 @@ def test_real_result_name_only(monkeypatch):
     ip2 = _ip2(monkeypatch)
     [it] = run(ip2, "[오경주생지사1동] [오후 12:39]\n신해숙 실적 넣어주세요")
     assert (it.ic, it.person, it.date, it.frm, it.kind, it.action, it.status) ==         ("오경주", "신해숙", MON, "", "", "실적", "대기")
+
+
+def test_delete_time_only(ip):
+    # 서비스 없이 시간만 적은 삭제: 그 시간과 겹치는 일정을 지운다
+    [it] = run(ip, "이미화\n장귀현 1212-1213 삭제")  # 1분짜리는 전화로 짐작 (서비스가 달라도 그 시간 일정을 지운다)
+    assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == ("장귀현", "1212", "1213", "전화", "삭제", "대기")
+    [it] = run(ip, "이미화\n장귀현 1000-1100 삭제")
+    assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == ("장귀현", "1000", "1100", "", "삭제", "대기")
