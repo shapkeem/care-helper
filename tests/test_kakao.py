@@ -359,21 +359,14 @@ def test_real_merge_to_outing(monkeypatch):
         ("김남희", "1123", "1430", "외출", "수정")]
 
 
-def test_bulk_result_without_name(ip):
-    # 이름·시간·서비스 없이 실적만: 그 지원사 어르신 모두의 그날 지난 일정에 실적
-    [it] = run(ip, "이미화\n대상지 실적 넣어주세요")
-    assert (it.ic, it.person, it.date, it.frm, it.kind, it.action, it.status) == \
-        ("이미화", kakao.ALL_CLIENTS, MON, "", "", "실적", "대기")
-    [it] = run(ip, "이미화\n어제 전화 실적 부탁드려요")
-    assert (it.person, it.date, it.kind, it.action) == (kakao.ALL_CLIENTS, MON - timedelta(days=1), "전화", "실적")
+
+def test_result_name_only(ip):
+    # 시간·서비스·날짜 없이 이름만: 그 어르신 그날 지난 일정 중 실적 없는 것 모두 (실행 때 찾음)
+    [it] = run(ip, "이미화\n장귀현 실적 넣어주세요")
+    assert (it.ic, it.person, it.date, it.frm, it.kind, it.action, it.status) ==         ("이미화", "장귀현", MON, "", "", "실적", "대기")
 
 
-def test_bulk_only_for_result(ip):
-    [it] = run(ip, "이미화\n대상자 삭제 부탁드려요")
-    assert it.status != "대기" and it.person != kakao.ALL_CLIENTS
-
-
-def test_real_bulk_result(monkeypatch):
+def test_real_result_name_only(monkeypatch):
     ip2 = _ip2(monkeypatch)
-    [it] = run(ip2, "[오경주생지사1동] [오후 12:39]\n대상지 실적 넣어주세요")
-    assert (it.ic, it.person, it.date, it.action, it.status) == ("오경주", kakao.ALL_CLIENTS, MON, "실적", "대기")
+    [it] = run(ip2, "[오경주생지사1동] [오후 12:39]\n신해숙 실적 넣어주세요")
+    assert (it.ic, it.person, it.date, it.frm, it.kind, it.action, it.status) ==         ("오경주", "신해숙", MON, "", "", "실적", "대기")

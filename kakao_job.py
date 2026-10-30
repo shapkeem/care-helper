@@ -212,9 +212,8 @@ def row_problems(row, ics, names, today):
     bad = set()
     if row.get("ic") not in ics:
         bad.add("ic")
-    bulk = row.get("person") == kakao.ALL_CLIENTS
-    if row.get("person") not in names and not (bulk and row.get("action") == "실적" and not row.get("time")):
-        bad.add("person")  # '모두'는 시간 없는 실적만 (그 지원사 그날 지난 일정 전부)
+    if row.get("person") not in names:
+        bad.add("person")
     if not parse_md(row.get("date"), today):
         bad.add("date")
     no_time_ok = row.get("action") in ("실적", "삭제") or (row.get("action") == "수정" and row.get("kind") in g.SERVICES)
@@ -230,7 +229,7 @@ def row_problems(row, ics, names, today):
 def row_to_item(row, roster, today):
     """고친 표 한 줄 → 처리할 kakao.Item. 보낸 지원사 담당이 아닌 어르신이면 대직."""
     frm, to = parse_range(row["time"]) or ("", "")
-    mine = row["person"] == kakao.ALL_CLIENTS or         any(r["성명"] == row["person"] and r.get("생활지원사") == row["ic"] for r in roster)
+    mine = any(r["성명"] == row["person"] and r.get("생활지원사") == row["ic"] for r in roster)
     it = kakao.Item(ic=row["ic"], person=row["person"], date=parse_md(row["date"], today), frm=frm, to=to,
                     kind=row["kind"], action=row["action"], source=row.get("source", ""), substitute=not mine)
     it._id = row["id"]

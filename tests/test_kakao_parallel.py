@@ -74,37 +74,12 @@ def test_substitute_falls_back_to_upload(monkeypatch):
     assert own.status == "확인 필요"  # 자기 담당이면 그대로 오류로 알림
 
 
-def test_review_rows_all_clients():
+
+def test_review_rows_result_without_kind():
     from datetime import date
     today = date(2026, 10, 21)
-    row = {"id": 1, "ic": "이미화", "person": kakao_job.kakao.ALL_CLIENTS, "date": "10/21", "time": "", "kind": "",
+    row = {"id": 1, "ic": "이미화", "person": "장귀현", "date": "10/21", "time": "", "kind": "",
            "action": "실적", "checked": True}
-    assert kakao_job.row_problems(row, {"이미화"}, {"장귀현"}, today) == set()
-    assert kakao_job.row_problems(dict(row, person="장귀현"), {"이미화"}, {"장귀현"}, today) == set()  # 시간 없는 실적은 서비스 비워도 됨
-    assert kakao_job.row_problems(dict(row, action="일정등록"), {"이미화"}, {"장귀현"}, today) >= {"person", "time"}
-    assert kakao_job.row_problems(dict(row, time="1000~1100"), {"이미화"}, {"장귀현"}, today) == {"person", "kind"}
-    it = kakao_job.row_to_item(row, [], today)
-    assert (it.person, it.substitute) == (kakao_job.kakao.ALL_CLIENTS, False)
-
-
-def test_run_all_clients(monkeypatch):
-    from datetime import date, datetime
-    import runner
-    d = date(2026, 10, 21)
-    plans = [dict(person="장귀현", date="20261021", **{"from": "0900", "to": "0930"}, code="A", result=False, seq=1),
-             dict(person="김말순", date="20261021", **{"from": "1000", "to": "1030"}, code="B", result=True, seq=2),
-             dict(person="김말순", date="20261021", **{"from": "1100", "to": "1101"}, code="B", result=False, seq=3),
-             dict(person="장귀현", date="20261021", **{"from": "1500", "to": "1530"}, code="A", result=False, seq=4)]
-    done = []
-    monkeypatch.setattr(runner, "day_plans_all", lambda page, ic, dd: plans)
-    monkeypatch.setattr(runner.g, "forget_screens", lambda page: None)
-    monkeypatch.setattr(runner.g, "open_result", lambda page, person, ic, y, m: done.append(person))
-    monkeypatch.setattr(runner.g, "register_result", lambda page, dlg, seq, dd: done.append(seq))
-    monkeypatch.setattr(runner.g, "CODE_TO_KIND", {"A": "방문", "B": "전화"})
-    it = kakao_job.kakao.Item(ic="이미화", person=kakao_job.kakao.ALL_CLIENTS, date=d, action="실적")
-    runner.run_item(None, None, it, None, lambda m: None, now=datetime(2026, 10, 21, 12, 0))
-    assert done == ["장귀현", 1, "김말순", 3]
-    done.clear()
-    it.kind = "방문"
-    runner.run_item(None, None, it, None, lambda m: None, now=datetime(2026, 10, 21, 12, 0))
-    assert done == ["장귀현", 1]
+    assert kakao_job.row_problems(row, {"이미화"}, {"장귀현"}, today) == set()  # 시간 없는 실적은 서비스 비워도 됨
+    assert kakao_job.row_problems(dict(row, time="1000~1100"), {"이미화"}, {"장귀현"}, today) == {"kind"}
+    assert kakao_job.row_problems(dict(row, action="일정등록"), {"이미화"}, {"장귀현"}, today) == {"time", "kind"}
