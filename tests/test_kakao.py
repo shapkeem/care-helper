@@ -378,3 +378,15 @@ def test_delete_time_only(ip):
     assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == ("장귀현", "1212", "1213", "전화", "삭제", "대기")
     [it] = run(ip, "이미화\n장귀현 1000-1100 삭제")
     assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == ("장귀현", "1000", "1100", "", "삭제", "대기")
+
+
+def test_meal_word_alone():
+    # '식사'만 써도 식사관리. 재단 '식사 지원'·'식사 배달'은 지금처럼 자동 처리하지 않는다
+    assert [k for _, k in kakao.find_kinds("식사 실적")] == ["식사"]
+    assert [k for _, k in kakao.find_kinds("식사관리 실적")] == ["식사"]
+    assert [k for _, k in kakao.find_kinds("식사 배달 왔어요")] == ["!식사"]
+
+
+def test_meal_result(ip):
+    [it] = run(ip, "이미화\n장귀현 1000-1030 식사 실적 부탁드려요")
+    assert (it.person, it.frm, it.to, it.kind, it.action, it.status) == ("장귀현", "1000", "1030", "식사", "실적", "대기")
