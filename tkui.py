@@ -185,6 +185,45 @@ class RoundPanel(tk.Canvas):
         self.itemconfigure(self._win, width=w - self._padx * 2)
 
 
+class DropZone(tk.Canvas):
+    """파일을 끌어다 놓는 자리: 점선 둥근 상자 + 가운데 그림·글·버튼. flash() 하면 테두리가 잠깐 초록."""
+    H = 150
+
+    def __init__(self, master, title, sub, bg=C_BG):
+        super().__init__(master, height=self.H, bg=bg, highlightthickness=0, bd=0)
+        self._title, self._sub, self._ok = title, sub, False
+        self.inner = tk.Frame(self, bg="#F8FAFF")  # 버튼 자리
+        self._win = self.create_window(0, 0, window=self.inner, anchor="n")
+        self.bind("<Configure>", lambda e: self._draw())
+
+    def flash(self):
+        self._ok = True
+        self._draw()
+        self.after(900, lambda: (setattr(self, "_ok", False), self._draw()))
+
+    def _draw(self):
+        w, h = self.winfo_width(), self.H
+        if w < 60:
+            return
+        self.delete("d")
+        fill, line = ("#F0FDF4", "#22C55E") if self._ok else ("#F8FAFF", "#93C5FD")
+        self.inner.configure(bg=fill)
+        self.create_polygon(_round_points(2, 2, w - 3, h - 3, 16), smooth=True, fill=fill, outline=line, width=2,
+                            dash=(6, 4), tags="d")
+        cx = w / 2
+        # 문서 그림 + 위쪽 화살표
+        x, y = cx - 15, 18
+        self.create_polygon(x, y, x + 22, y, x + 30, y + 8, x + 30, y + 36, x, y + 36, fill="#FFFFFF",
+                            outline=line, width=2, tags="d")
+        self.create_line(x + 22, y, x + 22, y + 8, x + 30, y + 8, fill=line, width=2, tags="d")
+        self.create_line(cx, y + 29, cx, y + 14, fill="#2563EB", width=2, tags="d")
+        self.create_line(cx - 5, y + 19, cx, y + 14, cx + 5, y + 19, fill="#2563EB", width=2, tags="d")
+        self.create_text(cx, 74, text=self._title, font=_font(11, True), fill=C_TEXT, tags="d")
+        self.create_text(cx, 96, text=self._sub, font=_font(9), fill=C_MUTED, tags="d")
+        self.tag_lower("d")
+        self.coords(self._win, cx, 110)
+
+
 class RoundCheck(tk.Canvas):
     """둥근 체크박스 (기본 체크박스는 네모난 옛날 모양이라 직접 그린다). 켜면 파란 칸에 흰 체크.
     variable: tk.BooleanVar, text 를 주면 오른쪽에 글자도 그리고 글자를 눌러도 켜고 끈다."""
@@ -1366,50 +1405,66 @@ class TkUI:
             self.label(line, r["note"] or "", 9, fg=C_MUTED, wraplength=460).pack(side="left", fill="x", expand=True)
 
     # ---------------------------------------------------------------- 서비스 상담지 입력 (s-care)
+    # 상담지 표 칸: (키, 제목, 너비px)
+    C_COLS = (("name", "어르신", 92), ("file", "파일", 0), ("hour", "상담시각", 92), ("status", "상태", 96),
+              ("note", "메모", 0), ("x", "", 30))
+
     def build_counsel(self):
         p = self.page("counsel")
         acts, _ = self.head(p, "서비스 상담지 입력",
-                            "엑셀로 쓴 상담지를 s-care 서비스 상담지에 넣고 저장해요. 로그인은 크롬 창에서 직접 해 주세요.")
+                            "엑셀 상담지를 끌어다 놓고 [입력 시작]을 누르면 s-care 서비스 상담지에 넣고 저장해요.")
         self.c_start_btn = self.button(acts, "입력 시작", self.c_start, primary=True)
         self.c_start_btn.pack(side="right")
         self.button(acts, "s-care 열기", self.s_open).pack(side="right", padx=(0, 6))
-        f1 = tk.Frame(p, bg=C_BG)
-        f1.pack(fill="x", pady=(0, 8))
+        top = tk.Frame(p, bg=C_BG)
+        top.pack(fill="x", pady=(0, 12))
+        f1 = tk.Frame(top, bg=C_BG)
+        f1.pack(side="left", anchor="s")
         self.label(f1, "상담자", 9, fg=C_MUTED).pack(anchor="w")
-        cbox = RoundField(f1, width=150)
+        cbox = RoundField(f1, width=170)
         cbox.pack(anchor="w")
         self.c_counselor = cbox.w
-        drop = tk.Frame(p, bg="#F1F5F9", highlightbackground="#94A3B8", highlightthickness=1, padx=14, pady=12)
-        drop.pack(fill="x")
-        self.label(drop, "상담지 엑셀이나 폴더를 이 창으로 끌어다 놓으세요", 11, True, bg="#F1F5F9").pack(anchor="w")
-        self.label(drop, "폴더를 놓으면 안의 상담지를 모두 읽어요. 같은 어르신 파일을 다시 놓으면 새 파일로 바꿔요.",
-                   9, fg=C_MUTED, bg="#F1F5F9").pack(anchor="w", pady=(2, 8))
-        bt = tk.Frame(drop, bg="#F1F5F9")
-        bt.pack(anchor="w")
-        self.button(bt, "파일 고르기", self.c_pick_files, small=True).pack(side="left")
-        self.button(bt, "폴더 고르기", self.c_pick_folder, small=True).pack(side="left", padx=(6, 0))
-        self.button(bt, "양식 다운로드", self.c_template, small=True).pack(side="left", padx=(6, 0))
-        self.button(bt, "목록 비우기", self.c_clear, small=True).pack(side="left", padx=(6, 0))
-        self.c_msg = self.label(p, "상담일자는 방문일자, 상담장소는 수행기관의견(일반 → 유선상담, 중점 → 대상자 가정)으로 넣어요. "
-                                   "상담시각을 비우면 9시예요.", 9, fg=C_MUTED, wraplength=640)
-        self.c_msg.pack(fill="x", pady=(8, 0))
-        hdr = tk.Frame(p, bg=C_CARD)
-        hdr.pack(fill="x", pady=(8, 0))
-        hdr.configure(padx=8)
-        self.label(hdr, "어르신", 9, fg=C_MUTED, bg=C_CARD, width=10, pady=4).pack(side="left")
-        self.label(hdr, "파일", 9, fg=C_MUTED, bg=C_CARD, width=22).pack(side="left")
-        self.label(hdr, "상담시각", 9, fg=C_MUTED, bg=C_CARD, width=8).pack(side="left")
-        hc = tk.Frame(hdr, bg=C_CARD, width=96, height=24)
-        hc.pack_propagate(False)
-        hc.pack(side="left", padx=(0, 10))
-        tk.Label(hc, text="상태", font=self.F(9), fg=C_MUTED, bg=C_CARD).place(relx=0.5, rely=0.5, anchor="center")
-        self.label(hdr, "메모", 9, fg=C_MUTED, bg=C_CARD).pack(side="left")
+        rules = tk.Frame(top, bg=C_BG)
+        rules.pack(side="left", anchor="s", padx=(18, 0))
+        self.label(rules, "자동으로 넣는 값", 9, fg=C_MUTED).pack(anchor="w")
+        chips = tk.Frame(rules, bg=C_BG)
+        chips.pack(anchor="w")
+        for head, text in (("상담일자", "방문일자"), ("상담장소", "일반 유선상담 · 중점 대상자 가정"), ("상담시각", "비우면 9시")):
+            c = RoundPanel(chips, C_CARD, r=10, padx=12, pady=8)
+            c.pack(side="left", padx=(0, 6))
+            tk.Label(c.inner, text=head, font=self.F(8, True), fg=C_MUTED, bg=C_CARD).pack(side="left")
+            tk.Label(c.inner, text=text, font=self.F(9), fg=C_TEXT, bg=C_CARD).pack(side="left", padx=(6, 0))
+            c.configure(width=self.F(8, True).measure(head) + self.F(9).measure(text) + 36)
+        self.c_zone = DropZone(p, "상담지 엑셀이나 폴더를 여기로 끌어다 놓으세요",
+                               "폴더를 놓으면 안의 상담지를 모두 읽어요 · 같은 어르신은 새 파일로 바꿔요")
+        self.c_zone.pack(fill="x")
+        zb = self.c_zone.inner
+        self.button(zb, "파일 고르기", self.c_pick_files, small=True).pack(side="left")
+        self.button(zb, "폴더 고르기", self.c_pick_folder, small=True).pack(side="left", padx=(6, 0))
+        self.button(zb, "빈 양식 받기", self.c_template, small=True).pack(side="left", padx=(6, 0))
+        bar = tk.Frame(p, bg=C_BG)
+        bar.pack(fill="x", pady=(14, 6))
+        self.c_count = self.label(bar, "상담지", 12, True)
+        self.c_count.pack(side="left")
+        self.c_msg = self.label(bar, "", 9, fg=C_MUTED)
+        self.c_msg.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        self.link(bar, "목록 비우기", self.c_clear).pack(side="right")
+        hdr = tk.Frame(p, bg=C_CARD, padx=8)
+        hdr.pack(fill="x")
+        self.c_grid(hdr)
+        for i, (key, title, _w) in enumerate(self.C_COLS):
+            tk.Label(hdr, text=title, font=self.F(9), fg=C_MUTED, bg=C_CARD,
+                     anchor="center" if key in ("hour", "status") else "w").grid(row=0, column=i, sticky="ew", pady=5, padx=4)
         wrap, self.c_list = self.scroll_list(p)
         wrap.pack(fill="both", expand=True)
-        self.empty(self.c_list, "상담지 엑셀을 끌어다 놓으면 여기에 나와요.")
-        self.c_log = self.logbox(p, 4)
+        self.c_log = self.logbox(p, 3)
         self.c_log.pack(fill="x", pady=(8, 0))
         self.c_rows = []  # [{name, file, hour(StringVar), status, note}]
+        self.c_render()
+
+    def c_grid(self, frame):
+        for i, (_k, _t, w) in enumerate(self.C_COLS):
+            frame.grid_columnconfigure(i, minsize=w, weight=0 if w else (2 if _k == "note" else 1))
 
     def c_set(self, text, err=False):
         self.c_msg.configure(text=text, fg=C_DANGER if err else C_MUTED)
@@ -1432,7 +1487,8 @@ class TkUI:
             self.c_set(f"못 읽은 파일이 {len(r['errors'])}개 있어요.", True)
             messagebox.showwarning(self.app.APP_NAME, "못 읽은 상담지가 있어요.\n\n" + "\n".join("· " + e for e in r["errors"]))
         else:
-            self.c_set(f"상담지 {len(r['rows'])}개를 읽었어요. 상담시각을 확인하고 [입력 시작]을 눌러 주세요.")
+            self.c_zone.flash()
+            self.c_set("상담시각을 확인하고 [입력 시작]을 눌러 주세요.")
 
     def c_sync(self, rows):
         """API 의 목록에 맞추고, 이미 적은 상담시각은 그대로 둔다"""
@@ -1444,22 +1500,44 @@ class TkUI:
                                 "status": "대기", "note": ""})
         self.c_render()
 
+    def c_remove(self, name):
+        if self.api._b["scare"]["v"]:
+            return
+        self.c_sync(self.api.counsel_remove(name))
+
     def c_render(self):
         self.clear(self.c_list)
-        if not self.c_rows:
-            self.empty(self.c_list, "상담지 엑셀을 끌어다 놓으면 여기에 나와요.")
+        n = len(self.c_rows)
+        self.c_count.configure(text=f"상담지 {n}개" if n else "상담지")
+        if not n:
+            self.empty(self.c_list, "끌어다 놓은 상담지가 여기에 나와요.")
             return
+        busy = self.api._b["scare"]["v"]
         for r in self.c_rows:
-            line = tk.Frame(self.c_list, bg=C_BG, padx=8, pady=6)
+            line = tk.Frame(self.c_list, bg=C_BG, padx=8, pady=5)
             line.pack(fill="x")
             tk.Frame(self.c_list, bg=C_LINE, height=1).pack(fill="x")
-            self.label(line, r["name"], 10, True, width=9).pack(side="left")
-            self.label(line, r["file"], 9, fg=C_MUTED, width=24).pack(side="left")
-            e = tk.Entry(line, textvariable=r["hour"], width=5, font=self.F(10), relief="solid", bd=1, justify="center")
-            e.pack(side="left", padx=(8, 18))
-            self.status_cell(line, r["status"])[0].pack(side="left", padx=(0, 10))
-            self.label(line, r["note"] or "", 9, fg=C_MUTED, wraplength=360).pack(
-                side="left", fill="x", expand=True)
+            self.c_grid(line)
+            self.label(line, r["name"], 10, True).grid(row=0, column=0, sticky="w", padx=4)
+            self.label(line, r["file"], 9, fg=C_MUTED, width=1).grid(row=0, column=1, sticky="ew", padx=4)
+            hc = tk.Frame(line, bg=C_BG)
+            hc.grid(row=0, column=2)
+            cf = CellField(hc, self.F(10))
+            cf.configure(width=44)
+            cf.e.configure(textvariable=r["hour"], justify="center")
+            cf.pack(side="left")
+            self.label(hc, "시", 9, fg=C_MUTED).pack(side="left", padx=(4, 0))
+            self.status_cell(line, r["status"])[0].grid(row=0, column=3)
+            note = self.label(line, r["note"] or "", 9, fg=C_DANGER if r["status"] in ("확인 필요", "오류") else C_MUTED,
+                              width=1)
+            note.grid(row=0, column=4, sticky="ew", padx=4)
+            note.bind("<Configure>", lambda e, w=note: w.configure(wraplength=max(80, e.width - 4)))
+            if not busy:
+                x = tk.Label(line, text="✕", font=self.F(9), fg="#94A3B8", bg=C_BG, cursor="hand2")
+                x.grid(row=0, column=5)
+                x.bind("<Button-1>", lambda e, nm=r["name"]: self.c_remove(nm))
+                x.bind("<Enter>", lambda e, w=x: w.configure(fg=C_DANGER))
+                x.bind("<Leave>", lambda e, w=x: w.configure(fg="#94A3B8"))
 
     def c_pick_files(self):
         from tkinter import filedialog
@@ -1485,7 +1563,7 @@ class TkUI:
             self.c_set("s-care 작업 중에는 목록을 바꿀 수 없어요.", True)
             return
         self.c_sync(self.api.counsel_remove())
-        self.c_set("목록을 비웠어요.")
+        self.c_set("")
 
     def c_start(self):
         r = self.api.counsel_start([{"name": x["name"], "hour": x["hour"].get()} for x in self.c_rows],
