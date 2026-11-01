@@ -37,7 +37,7 @@ jobs:
             --onefile-tempdir-spec="{CACHE_DIR}/CareHelper/{VERSION}" `
             --include-data-files=icon.ico=icon.ico `
             --include-module=tkui --include-module=api --include-module=plan_converter --include-module=scare_plan `
-            --include-module=kakao --include-module=kakao_job --include-module=runner --include-module=goodeos_work --include-module=jev `
+            --include-module=kakao --include-module=kakao_job --include-module=runner --include-module=goodeos_work --include-module=jev --include-module=imefix `
             --include-package=playwright --include-data-dir="$drv=playwright/driver" `
             --enable-plugin=tk-inter --nofollow-import-to=webview --nofollow-import-to=playwright.async_api `
             --output-dir=dist --output-filename="CareHelper-$ver.exe" `

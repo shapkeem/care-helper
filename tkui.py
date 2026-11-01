@@ -437,6 +437,8 @@ class TkUI:
         # 기본 글꼴을 모두 맑은 고딕으로: 한글 입력(조합) 중 글자가 커졌다 작아졌다 하지 않게
         for name in ("TkDefaultFont", "TkTextFont", "TkFixedFont", "TkMenuFont", "TkHeadingFont"):
             tkfont.nametofont(name).configure(family=FONT, size=10)
+        import imefix
+        imefix.install(root)  # 한글 조합 중 글자 크기·Ctrl+A·다른 곳 누를 때 마지막 글자가 사라지던 문제
         self.RB = _round_button_class()
         style = ttk.Style()
         try:
