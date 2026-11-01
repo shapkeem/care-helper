@@ -623,7 +623,7 @@ class TkUI:
         self.content.pack(side="left", fill="both", expand=True)
         self.label(side, "맞춤돌봄도우미", 13, True, bg=C_SIDE, padx=18, pady=18).pack(fill="x")
         for key, text in (("daily", "일일실적 점검"), ("kakao", "카톡 요청 처리"), ("conv", "제공계획서 변환"),
-                          ("scare", "서비스 제공계획 입력")):
+                          ("scare", "서비스 제공계획 입력"), ("counsel", "서비스 상담지 입력")):
             self.nav_item(side, key, text)
         bottom = tk.Frame(side, bg=C_SIDE)
         bottom.pack(side="bottom", fill="x", pady=(0, 14))
@@ -640,6 +640,7 @@ class TkUI:
         self.build_kakao()
         self.build_conv()
         self.build_scare()
+        self.build_counsel()
         self.build_settings()
 
     def nav_item(self, parent, key, text):
@@ -1364,6 +1365,143 @@ class TkUI:
             self.status_cell(line, r["status"])[0].pack(side="left", padx=(0, 10))
             self.label(line, r["note"] or "", 9, fg=C_MUTED, wraplength=460).pack(side="left", fill="x", expand=True)
 
+    # ---------------------------------------------------------------- 서비스 상담지 입력 (s-care)
+    def build_counsel(self):
+        p = self.page("counsel")
+        acts, _ = self.head(p, "서비스 상담지 입력",
+                            "엑셀로 쓴 상담지를 s-care 서비스 상담지에 넣고 저장해요. 로그인은 크롬 창에서 직접 해 주세요.")
+        self.c_start_btn = self.button(acts, "입력 시작", self.c_start, primary=True)
+        self.c_start_btn.pack(side="right")
+        self.button(acts, "s-care 열기", self.s_open).pack(side="right", padx=(0, 6))
+        f1 = tk.Frame(p, bg=C_BG)
+        f1.pack(fill="x", pady=(0, 8))
+        self.label(f1, "상담자", 9, fg=C_MUTED).pack(anchor="w")
+        cbox = RoundField(f1, width=150)
+        cbox.pack(anchor="w")
+        self.c_counselor = cbox.w
+        drop = tk.Frame(p, bg="#F1F5F9", highlightbackground="#94A3B8", highlightthickness=1, padx=14, pady=12)
+        drop.pack(fill="x")
+        self.label(drop, "상담지 엑셀이나 폴더를 이 창으로 끌어다 놓으세요", 11, True, bg="#F1F5F9").pack(anchor="w")
+        self.label(drop, "폴더를 놓으면 안의 상담지를 모두 읽어요. 같은 어르신 파일을 다시 놓으면 새 파일로 바꿔요.",
+                   9, fg=C_MUTED, bg="#F1F5F9").pack(anchor="w", pady=(2, 8))
+        bt = tk.Frame(drop, bg="#F1F5F9")
+        bt.pack(anchor="w")
+        self.button(bt, "파일 고르기", self.c_pick_files, small=True).pack(side="left")
+        self.button(bt, "폴더 고르기", self.c_pick_folder, small=True).pack(side="left", padx=(6, 0))
+        self.button(bt, "양식 다운로드", self.c_template, small=True).pack(side="left", padx=(6, 0))
+        self.button(bt, "목록 비우기", self.c_clear, small=True).pack(side="left", padx=(6, 0))
+        self.c_msg = self.label(p, "상담일자는 방문일자, 상담장소는 수행기관의견(일반 → 유선상담, 중점 → 대상자 가정)으로 넣어요. "
+                                   "상담시각을 비우면 9시예요.", 9, fg=C_MUTED, wraplength=640)
+        self.c_msg.pack(fill="x", pady=(8, 0))
+        hdr = tk.Frame(p, bg=C_CARD)
+        hdr.pack(fill="x", pady=(8, 0))
+        hdr.configure(padx=8)
+        self.label(hdr, "어르신", 9, fg=C_MUTED, bg=C_CARD, width=10, pady=4).pack(side="left")
+        self.label(hdr, "파일", 9, fg=C_MUTED, bg=C_CARD, width=22).pack(side="left")
+        self.label(hdr, "상담시각", 9, fg=C_MUTED, bg=C_CARD, width=8).pack(side="left")
+        hc = tk.Frame(hdr, bg=C_CARD, width=96, height=24)
+        hc.pack_propagate(False)
+        hc.pack(side="left", padx=(0, 10))
+        tk.Label(hc, text="상태", font=self.F(9), fg=C_MUTED, bg=C_CARD).place(relx=0.5, rely=0.5, anchor="center")
+        self.label(hdr, "메모", 9, fg=C_MUTED, bg=C_CARD).pack(side="left")
+        wrap, self.c_list = self.scroll_list(p)
+        wrap.pack(fill="both", expand=True)
+        self.empty(self.c_list, "상담지 엑셀을 끌어다 놓으면 여기에 나와요.")
+        self.c_log = self.logbox(p, 4)
+        self.c_log.pack(fill="x", pady=(8, 0))
+        self.c_rows = []  # [{name, file, hour(StringVar), status, note}]
+
+    def c_set(self, text, err=False):
+        self.c_msg.configure(text=text, fg=C_DANGER if err else C_MUTED)
+
+    def c_drop(self, paths):
+        if self.cur != "counsel":  # 다른 화면에서 놓은 건 받지 않는다
+            self.toast("상담지는 '서비스 상담지 입력' 화면에 끌어다 놓아 주세요.")
+            return
+        self.c_add(paths)
+
+    def c_add(self, paths):
+        if not paths:
+            return
+        if self.api._b["scare"]["v"]:
+            self.c_set("s-care 작업 중에는 목록을 바꿀 수 없어요. 끝난 뒤 다시 놓아 주세요.", True)
+            return
+        r = self.api.counsel_add(list(paths))
+        self.c_sync(r["rows"])
+        if r["errors"]:
+            self.c_set(f"못 읽은 파일이 {len(r['errors'])}개 있어요.", True)
+            messagebox.showwarning(self.app.APP_NAME, "못 읽은 상담지가 있어요.\n\n" + "\n".join("· " + e for e in r["errors"]))
+        else:
+            self.c_set(f"상담지 {len(r['rows'])}개를 읽었어요. 상담시각을 확인하고 [입력 시작]을 눌러 주세요.")
+
+    def c_sync(self, rows):
+        """API 의 목록에 맞추고, 이미 적은 상담시각은 그대로 둔다"""
+        old = {r["name"]: r for r in self.c_rows}
+        self.c_rows = []
+        for x in rows:
+            o = old.get(x["name"])
+            self.c_rows.append({"name": x["name"], "file": x["file"], "hour": o["hour"] if o else tk.StringVar(),
+                                "status": "대기", "note": ""})
+        self.c_render()
+
+    def c_render(self):
+        self.clear(self.c_list)
+        if not self.c_rows:
+            self.empty(self.c_list, "상담지 엑셀을 끌어다 놓으면 여기에 나와요.")
+            return
+        for r in self.c_rows:
+            line = tk.Frame(self.c_list, bg=C_BG, padx=8, pady=6)
+            line.pack(fill="x")
+            tk.Frame(self.c_list, bg=C_LINE, height=1).pack(fill="x")
+            self.label(line, r["name"], 10, True, width=9).pack(side="left")
+            self.label(line, r["file"], 9, fg=C_MUTED, width=24).pack(side="left")
+            e = tk.Entry(line, textvariable=r["hour"], width=5, font=self.F(10), relief="solid", bd=1, justify="center")
+            e.pack(side="left", padx=(8, 18))
+            self.status_cell(line, r["status"])[0].pack(side="left", padx=(0, 10))
+            self.label(line, r["note"] or "", 9, fg=C_MUTED, wraplength=360).pack(
+                side="left", fill="x", expand=True)
+
+    def c_pick_files(self):
+        from tkinter import filedialog
+        self.c_add(filedialog.askopenfilenames(title="상담지 엑셀 고르기", filetypes=[("엑셀", "*.xlsx")]))
+
+    def c_pick_folder(self):
+        from tkinter import filedialog
+        d = filedialog.askdirectory(title="상담지 폴더 고르기")
+        if d:
+            self.c_add([d])
+
+    def c_template(self):
+        from tkinter import filedialog
+        path = filedialog.asksaveasfilename(title="상담지 양식 저장", defaultextension=".xlsx",
+                                            initialfile="이름_상담지.xlsx", filetypes=[("엑셀", "*.xlsx")])
+        if not path:
+            return
+        err = self.api.counsel_template(path)
+        self.c_set(err or f"양식을 저장했어요: {path}", bool(err))
+
+    def c_clear(self):
+        if self.api._b["scare"]["v"]:
+            self.c_set("s-care 작업 중에는 목록을 바꿀 수 없어요.", True)
+            return
+        self.c_sync(self.api.counsel_remove())
+        self.c_set("목록을 비웠어요.")
+
+    def c_start(self):
+        r = self.api.counsel_start([{"name": x["name"], "hour": x["hour"].get()} for x in self.c_rows],
+                                   self.c_counselor.get())
+        if r.get("error"):
+            self.c_set(r["error"], True)
+            messagebox.showwarning(self.app.APP_NAME, r["error"])
+            return
+        for x, y in zip(self.c_rows, r["rows"]):
+            x["hour"].set(str(int(y["hour"])))
+            x.update(status="대기", note="")
+        self.c_render()
+        self.log_clear(self.c_log)
+        self.c_start_btn.set_enabled(False)
+        self.c_set("입력하는 중이에요...")
+
     # ---------------------------------------------------------------- 설정
     def build_settings(self):
         p = self.page("settings")
@@ -1532,6 +1670,25 @@ class TkUI:
             self.conv_refresh()
         elif ev == "s_msg":
             self.s_set(d["msg"], not d["ok"])
+            self.c_set(d["msg"], not d["ok"])
+        elif ev == "c_log":
+            self.log_add(self.c_log, d)
+        elif ev == "c_row":
+            self.c_rows[d["i"]].update(status=d["status"], note=d["note"])
+            self.c_render()
+        elif ev == "c_done":
+            self.c_start_btn.set_enabled(True)
+            if d and d.get("error"):
+                self.c_set(d["error"], True)
+                messagebox.showwarning(a.APP_NAME, d["error"] + "\n\n아무것도 저장하지 않았어요.")
+                return
+            ok = sum(1 for r in self.c_rows if r["status"] == "완료")
+            bad = [r for r in self.c_rows if r["status"] != "완료"]
+            self.c_set(f"끝났어요: {len(self.c_rows)}분 중 {ok}분 저장", bool(bad))
+            if bad:
+                messagebox.showwarning(a.APP_NAME, "확인이 필요한 어르신이 있어요.\n\n"
+                                       + "\n".join(f"· {r['name']}: {r['note']}" for r in bad))
+            self.refresh_status()
         elif ev == "s_log":
             self.log_add(self.s_log, d)
         elif ev == "s_row":
@@ -1586,6 +1743,9 @@ class TkUI:
         self.s_other.paint()
         self.s_group.set(sc["group"])
         self.s_group.paint()
+        self.c_counselor.insert(0, self.api.counsel_info()["counselor"])
+        import dropfiles
+        dropfiles.install(self.root, self.c_drop)
         self.root.bind_all("<MouseWheel>", self._wheel)
         self.show("daily")
         self.root.after(50, self.pump)

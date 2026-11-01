@@ -51,6 +51,7 @@ class Api:
         self._check = None
         self._filled = set()  # 실적을 넣은 사람 번호 (모두 넣기에서 다시 넣지 않게)
         self._upd = None
+        self._counsel = {}  # 상담지: 어르신 이름 → {path, data}
         import kakao_job
         self._job = kakao_job.KakaoJob(
             app, self._b["kakao"],
@@ -428,6 +429,79 @@ class Api:
                 self._b["scare"]["v"] = False
         self._thread(work)
         return {"people": [{"name": n, "group": g} for n, g in people]}
+
+    # ---- s-care 서비스 상담지
+    def counsel_info(self):
+        return {"counselor": self._app.load_settings().get("scare_counselor", "")}
+
+    def counsel_add(self, paths):
+        """끌어다 놓은 파일·폴더 → 읽은 상담지들. 같은 어르신은 새 파일로 바꾼다."""
+        import scare_counsel as sc
+        files = sc.collect(paths)
+        errors = []
+        for f in files:
+            try:
+                d = sc.read_counsel(f)
+            except sc.CounselError as e:
+                errors.append(str(e))
+                continue
+            self._counsel[d["name"]] = {"path": str(f), "data": d}
+        if not files:
+            errors.append("상담지 엑셀(.xlsx)이 없어요.")
+        return {"rows": self.counsel_rows(), "errors": errors}
+
+    def counsel_rows(self):
+        import os
+        return [{"name": n, "file": os.path.basename(v["path"])} for n, v in self._counsel.items()]
+
+    def counsel_remove(self, name=None):
+        if name is None:
+            self._counsel.clear()
+        else:
+            self._counsel.pop(name, None)
+        return self.counsel_rows()
+
+    def counsel_template(self, path):
+        import scare_counsel as sc
+        try:
+            sc.write_template(path)
+        except Exception as e:
+            return f"양식을 저장하지 못했어요: {e}"
+        return None
+
+    def counsel_start(self, rows, counselor):
+        """rows: [{name, hour}] (화면 표 순서)"""
+        import scare_counsel as sc
+        if self._b["scare"]["v"]:
+            return {"error": "s-care 작업이 이미 진행 중이에요."}
+        counselor = (counselor or "").strip()
+        if not counselor:
+            return {"error": "상담자 이름을 넣어 주세요."}
+        if not rows:
+            return {"error": "상담지 엑셀을 끌어다 놓아 주세요."}
+        items = []
+        for r in rows:
+            try:
+                items.append({"name": r["name"], "data": self._counsel[r["name"]]["data"], "hour": sc.hour(r.get("hour"))})
+            except sc.CounselError as e:
+                return {"error": f"{r['name']}: {e}"}
+        self._app.save_settings(scare_counselor=counselor)
+        self._b["scare"]["v"] = True
+
+        def work():
+            log = lambda m: self._emit("c_log", m)
+            try:
+                sc.run(self._app, items, counselor,
+                       lambda i, st, note: self._emit("c_row", {"i": i, "status": st, "note": note}), log)
+                self._emit("c_done", None)
+            except sc.sp.ScareError as e:  # 로그인 안 됨, 상담자 틀림: 아무것도 저장하지 않음
+                self._emit("c_done", {"error": str(e)})
+            except Exception as e:
+                self._emit("c_done", {"error": f"문제가 생겼어요: {str(e).splitlines()[0][:200]}"})
+            finally:
+                self._b["scare"]["v"] = False
+        self._thread(work)
+        return {"rows": [{"name": i["name"], "hour": i["hour"]} for i in items]}
 
     # ---- 설정
     def save_settings(self, user_id, password, jev_key, hide):
