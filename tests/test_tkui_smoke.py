@@ -40,16 +40,16 @@ def _build_and_widgets():
         ui.k_question({"question": "몇 분 동안 했어요?", "options": [{"key": "30분", "desc": ""}, {"key": "60분", "desc": ""}]})
         ui.root.update()
         # 서비스 상담지 입력 화면: 목록·상담시각 칸·결과 표시
-        assert "counsel" in ui.pages and isinstance(ui.c_counselor, tk.Entry)
-        ui.c_sync([{"name": "홍길동", "file": "홍길동_상담지.xlsx"}])
-        ui.c_rows[0]["hour"].set("14")
-        ui.c_sync([{"name": "홍길동", "file": "홍길동_상담지(1).xlsx"}, {"name": "김철수", "file": "김철수_상담지.xlsx"}])
-        assert [r["hour"].get() for r in ui.c_rows] == ["14", ""]  # 다시 놓아도 적은 시각은 그대로
-        ui.c_rows[0].update(status="완료", note="저장 완료")
-        ui.c_render()
+        assert "counsel" in ui.pages and isinstance(ui.cs_counselor, tk.Entry)
+        ui.cs_sync([{"name": "홍길동", "file": "홍길동_상담지.xlsx"}])
+        ui.cs_rows[0]["hour"].set("14")
+        ui.cs_sync([{"name": "홍길동", "file": "홍길동_상담지(1).xlsx"}, {"name": "김철수", "file": "김철수_상담지.xlsx"}])
+        assert [r["hour"].get() for r in ui.cs_rows] == ["14", ""]  # 다시 놓아도 적은 시각은 그대로
+        ui.cs_rows[0].update(status="완료", note="저장 완료")
+        ui.cs_render()
         ui.cur = "daily"
-        ui.c_drop(["C:\\x.xlsx"])  # 다른 화면에서 놓으면 받지 않는다
-        assert len(ui.c_rows) == 2
+        ui.cs_drop(["C:\\x.xlsx"])  # 다른 화면에서 놓으면 받지 않는다
+        assert len(ui.cs_rows) == 2
         ui.root.update()
     finally:
         ui.root.destroy()

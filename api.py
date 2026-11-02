@@ -489,15 +489,15 @@ class Api:
         self._b["scare"]["v"] = True
 
         def work():
-            log = lambda m: self._emit("c_log", m)
+            log = lambda m: self._emit("cs_log", m)
             try:
                 sc.run(self._app, items, counselor,
-                       lambda i, st, note: self._emit("c_row", {"i": i, "status": st, "note": note}), log)
-                self._emit("c_done", None)
+                       lambda i, st, note: self._emit("cs_row", {"i": i, "status": st, "note": note}), log)
+                self._emit("cs_done", None)
             except sc.sp.ScareError as e:  # 로그인 안 됨, 상담자 틀림: 아무것도 저장하지 않음
-                self._emit("c_done", {"error": str(e)})
+                self._emit("cs_done", {"error": str(e)})
             except Exception as e:
-                self._emit("c_done", {"error": f"문제가 생겼어요: {str(e).splitlines()[0][:200]}"})
+                self._emit("cs_done", {"error": f"문제가 생겼어요: {str(e).splitlines()[0][:200]}"})
             finally:
                 self._b["scare"]["v"] = False
         self._thread(work)

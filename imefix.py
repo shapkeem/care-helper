@@ -104,7 +104,23 @@ def _key(e):
 
 
 def _key_up(e):
-    e.widget._ime_comp = composing(e.widget)
+    w = e.widget
+    w._ime_comp = composing(w)
+    if w._ime_comp:  # 고른 글자 위에 한글을 치기 시작하면 (다른 프로그램처럼) 고른 글자를 바로 지운다
+        _drop_selection(w)
+
+
+def _drop_selection(w):
+    try:
+        if isinstance(w, tk.Text):
+            if w.tag_ranges("sel"):
+                w.mark_set("insert", "sel.first")
+                w.delete("sel.first", "sel.last")
+        elif w.selection_present():
+            w.icursor("sel.first")
+            w.delete("sel.first", "sel.last")
+    except tk.TclError:
+        pass
 
 
 def _focus_out(e):

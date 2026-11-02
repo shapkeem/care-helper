@@ -1406,15 +1406,15 @@ class TkUI:
 
     # ---------------------------------------------------------------- 서비스 상담지 입력 (s-care)
     # 상담지 표 칸: (키, 제목, 너비px)
-    C_COLS = (("name", "어르신", 92), ("file", "파일", 0), ("hour", "상담시각", 92), ("status", "상태", 96),
+    CS_COLS = (("name", "어르신", 92), ("file", "파일", 0), ("hour", "상담시각", 92), ("status", "상태", 96),
               ("note", "메모", 0), ("x", "", 30))
 
     def build_counsel(self):
         p = self.page("counsel")
         acts, _ = self.head(p, "서비스 상담지 입력",
                             "엑셀 상담지를 끌어다 놓고 [입력 시작]을 누르면 s-care 서비스 상담지에 넣고 저장해요.")
-        self.c_start_btn = self.button(acts, "입력 시작", self.c_start, primary=True)
-        self.c_start_btn.pack(side="right")
+        self.cs_start_btn = self.button(acts, "입력 시작", self.cs_start, primary=True)
+        self.cs_start_btn.pack(side="right")
         self.button(acts, "s-care 열기", self.s_open).pack(side="right", padx=(0, 6))
         top = tk.Frame(p, bg=C_BG)
         top.pack(fill="x", pady=(0, 12))
@@ -1423,7 +1423,7 @@ class TkUI:
         self.label(f1, "상담자", 9, fg=C_MUTED).pack(anchor="w")
         cbox = RoundField(f1, width=170)
         cbox.pack(anchor="w")
-        self.c_counselor = cbox.w
+        self.cs_counselor = cbox.w
         rules = tk.Frame(top, bg=C_BG)
         rules.pack(side="left", anchor="s", padx=(18, 0))
         self.label(rules, "자동으로 넣는 값", 9, fg=C_MUTED).pack(anchor="w")
@@ -1435,89 +1435,89 @@ class TkUI:
             tk.Label(c.inner, text=head, font=self.F(8, True), fg=C_MUTED, bg=C_CARD).pack(side="left")
             tk.Label(c.inner, text=text, font=self.F(9), fg=C_TEXT, bg=C_CARD).pack(side="left", padx=(6, 0))
             c.configure(width=self.F(8, True).measure(head) + self.F(9).measure(text) + 36)
-        self.c_zone = DropZone(p, "상담지 엑셀이나 폴더를 여기로 끌어다 놓으세요",
+        self.cs_zone = DropZone(p, "상담지 엑셀이나 폴더를 여기로 끌어다 놓으세요",
                                "폴더를 놓으면 안의 상담지를 모두 읽어요 · 같은 어르신은 새 파일로 바꿔요")
-        self.c_zone.pack(fill="x")
-        zb = self.c_zone.inner
-        self.button(zb, "파일 고르기", self.c_pick_files, small=True).pack(side="left")
-        self.button(zb, "폴더 고르기", self.c_pick_folder, small=True).pack(side="left", padx=(6, 0))
-        self.button(zb, "빈 양식 받기", self.c_template, small=True).pack(side="left", padx=(6, 0))
+        self.cs_zone.pack(fill="x")
+        zb = self.cs_zone.inner
+        self.button(zb, "파일 고르기", self.cs_pick_files, small=True).pack(side="left")
+        self.button(zb, "폴더 고르기", self.cs_pick_folder, small=True).pack(side="left", padx=(6, 0))
+        self.button(zb, "빈 양식 받기", self.cs_template, small=True).pack(side="left", padx=(6, 0))
         bar = tk.Frame(p, bg=C_BG)
         bar.pack(fill="x", pady=(14, 6))
-        self.c_count = self.label(bar, "상담지", 12, True)
-        self.c_count.pack(side="left")
-        self.c_msg = self.label(bar, "", 9, fg=C_MUTED)
-        self.c_msg.pack(side="left", padx=(10, 0), fill="x", expand=True)
-        self.link(bar, "목록 비우기", self.c_clear).pack(side="right")
+        self.cs_count = self.label(bar, "상담지", 12, True)
+        self.cs_count.pack(side="left")
+        self.cs_msg = self.label(bar, "", 9, fg=C_MUTED)
+        self.cs_msg.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        self.link(bar, "목록 비우기", self.cs_clear).pack(side="right")
         hdr = tk.Frame(p, bg=C_CARD, padx=8)
         hdr.pack(fill="x")
-        self.c_grid(hdr)
-        for i, (key, title, _w) in enumerate(self.C_COLS):
+        self.cs_grid(hdr)
+        for i, (key, title, _w) in enumerate(self.CS_COLS):
             tk.Label(hdr, text=title, font=self.F(9), fg=C_MUTED, bg=C_CARD,
                      anchor="center" if key in ("hour", "status") else "w").grid(row=0, column=i, sticky="ew", pady=5, padx=4)
-        wrap, self.c_list = self.scroll_list(p)
+        wrap, self.cs_list = self.scroll_list(p)
         wrap.pack(fill="both", expand=True)
-        self.c_log = self.logbox(p, 3)
-        self.c_log.pack(fill="x", pady=(8, 0))
-        self.c_rows = []  # [{name, file, hour(StringVar), status, note}]
-        self.c_render()
+        self.cs_log = self.logbox(p, 3)
+        self.cs_log.pack(fill="x", pady=(8, 0))
+        self.cs_rows = []  # [{name, file, hour(StringVar), status, note}]
+        self.cs_render()
 
-    def c_grid(self, frame):
-        for i, (_k, _t, w) in enumerate(self.C_COLS):
+    def cs_grid(self, frame):
+        for i, (_k, _t, w) in enumerate(self.CS_COLS):
             frame.grid_columnconfigure(i, minsize=w, weight=0 if w else (2 if _k == "note" else 1))
 
-    def c_set(self, text, err=False):
-        self.c_msg.configure(text=text, fg=C_DANGER if err else C_MUTED)
+    def cs_set(self, text, err=False):
+        self.cs_msg.configure(text=text, fg=C_DANGER if err else C_MUTED)
 
-    def c_drop(self, paths):
+    def cs_drop(self, paths):
         if self.cur != "counsel":  # 다른 화면에서 놓은 건 받지 않는다
             self.toast("상담지는 '서비스 상담지 입력' 화면에 끌어다 놓아 주세요.")
             return
-        self.c_add(paths)
+        self.cs_add(paths)
 
-    def c_add(self, paths):
+    def cs_add(self, paths):
         if not paths:
             return
         if self.api._b["scare"]["v"]:
-            self.c_set("s-care 작업 중에는 목록을 바꿀 수 없어요. 끝난 뒤 다시 놓아 주세요.", True)
+            self.cs_set("s-care 작업 중에는 목록을 바꿀 수 없어요. 끝난 뒤 다시 놓아 주세요.", True)
             return
         r = self.api.counsel_add(list(paths))
-        self.c_sync(r["rows"])
+        self.cs_sync(r["rows"])
         if r["errors"]:
-            self.c_set(f"못 읽은 파일이 {len(r['errors'])}개 있어요.", True)
+            self.cs_set(f"못 읽은 파일이 {len(r['errors'])}개 있어요.", True)
             messagebox.showwarning(self.app.APP_NAME, "못 읽은 상담지가 있어요.\n\n" + "\n".join("· " + e for e in r["errors"]))
         else:
-            self.c_zone.flash()
-            self.c_set("상담시각을 확인하고 [입력 시작]을 눌러 주세요.")
+            self.cs_zone.flash()
+            self.cs_set("상담시각을 확인하고 [입력 시작]을 눌러 주세요.")
 
-    def c_sync(self, rows):
+    def cs_sync(self, rows):
         """API 의 목록에 맞추고, 이미 적은 상담시각은 그대로 둔다"""
-        old = {r["name"]: r for r in self.c_rows}
-        self.c_rows = []
+        old = {r["name"]: r for r in self.cs_rows}
+        self.cs_rows = []
         for x in rows:
             o = old.get(x["name"])
-            self.c_rows.append({"name": x["name"], "file": x["file"], "hour": o["hour"] if o else tk.StringVar(),
+            self.cs_rows.append({"name": x["name"], "file": x["file"], "hour": o["hour"] if o else tk.StringVar(),
                                 "status": "대기", "note": ""})
-        self.c_render()
+        self.cs_render()
 
-    def c_remove(self, name):
+    def cs_remove(self, name):
         if self.api._b["scare"]["v"]:
             return
-        self.c_sync(self.api.counsel_remove(name))
+        self.cs_sync(self.api.counsel_remove(name))
 
-    def c_render(self):
-        self.clear(self.c_list)
-        n = len(self.c_rows)
-        self.c_count.configure(text=f"상담지 {n}개" if n else "상담지")
+    def cs_render(self):
+        self.clear(self.cs_list)
+        n = len(self.cs_rows)
+        self.cs_count.configure(text=f"상담지 {n}개" if n else "상담지")
         if not n:
-            self.empty(self.c_list, "끌어다 놓은 상담지가 여기에 나와요.")
+            self.empty(self.cs_list, "끌어다 놓은 상담지가 여기에 나와요.")
             return
         busy = self.api._b["scare"]["v"]
-        for r in self.c_rows:
-            line = tk.Frame(self.c_list, bg=C_BG, padx=8, pady=5)
+        for r in self.cs_rows:
+            line = tk.Frame(self.cs_list, bg=C_BG, padx=8, pady=5)
             line.pack(fill="x")
-            tk.Frame(self.c_list, bg=C_LINE, height=1).pack(fill="x")
-            self.c_grid(line)
+            tk.Frame(self.cs_list, bg=C_LINE, height=1).pack(fill="x")
+            self.cs_grid(line)
             self.label(line, r["name"], 10, True).grid(row=0, column=0, sticky="w", padx=4)
             self.label(line, r["file"], 9, fg=C_MUTED, width=1).grid(row=0, column=1, sticky="ew", padx=4)
             hc = tk.Frame(line, bg=C_BG)
@@ -1535,50 +1535,50 @@ class TkUI:
             if not busy:
                 x = tk.Label(line, text="✕", font=self.F(9), fg="#94A3B8", bg=C_BG, cursor="hand2")
                 x.grid(row=0, column=5)
-                x.bind("<Button-1>", lambda e, nm=r["name"]: self.c_remove(nm))
+                x.bind("<Button-1>", lambda e, nm=r["name"]: self.cs_remove(nm))
                 x.bind("<Enter>", lambda e, w=x: w.configure(fg=C_DANGER))
                 x.bind("<Leave>", lambda e, w=x: w.configure(fg="#94A3B8"))
 
-    def c_pick_files(self):
+    def cs_pick_files(self):
         from tkinter import filedialog
-        self.c_add(filedialog.askopenfilenames(title="상담지 엑셀 고르기", filetypes=[("엑셀", "*.xlsx")]))
+        self.cs_add(filedialog.askopenfilenames(title="상담지 엑셀 고르기", filetypes=[("엑셀", "*.xlsx")]))
 
-    def c_pick_folder(self):
+    def cs_pick_folder(self):
         from tkinter import filedialog
         d = filedialog.askdirectory(title="상담지 폴더 고르기")
         if d:
-            self.c_add([d])
+            self.cs_add([d])
 
-    def c_template(self):
+    def cs_template(self):
         from tkinter import filedialog
         path = filedialog.asksaveasfilename(title="상담지 양식 저장", defaultextension=".xlsx",
                                             initialfile="이름_상담지.xlsx", filetypes=[("엑셀", "*.xlsx")])
         if not path:
             return
         err = self.api.counsel_template(path)
-        self.c_set(err or f"양식을 저장했어요: {path}", bool(err))
+        self.cs_set(err or f"양식을 저장했어요: {path}", bool(err))
 
-    def c_clear(self):
+    def cs_clear(self):
         if self.api._b["scare"]["v"]:
-            self.c_set("s-care 작업 중에는 목록을 바꿀 수 없어요.", True)
+            self.cs_set("s-care 작업 중에는 목록을 바꿀 수 없어요.", True)
             return
-        self.c_sync(self.api.counsel_remove())
-        self.c_set("")
+        self.cs_sync(self.api.counsel_remove())
+        self.cs_set("")
 
-    def c_start(self):
-        r = self.api.counsel_start([{"name": x["name"], "hour": x["hour"].get()} for x in self.c_rows],
-                                   self.c_counselor.get())
+    def cs_start(self):
+        r = self.api.counsel_start([{"name": x["name"], "hour": x["hour"].get()} for x in self.cs_rows],
+                                   self.cs_counselor.get())
         if r.get("error"):
-            self.c_set(r["error"], True)
+            self.cs_set(r["error"], True)
             messagebox.showwarning(self.app.APP_NAME, r["error"])
             return
-        for x, y in zip(self.c_rows, r["rows"]):
+        for x, y in zip(self.cs_rows, r["rows"]):
             x["hour"].set(str(int(y["hour"])))
             x.update(status="대기", note="")
-        self.c_render()
-        self.log_clear(self.c_log)
-        self.c_start_btn.set_enabled(False)
-        self.c_set("입력하는 중이에요...")
+        self.cs_render()
+        self.log_clear(self.cs_log)
+        self.cs_start_btn.set_enabled(False)
+        self.cs_set("입력하는 중이에요...")
 
     # ---------------------------------------------------------------- 설정
     def build_settings(self):
@@ -1748,21 +1748,21 @@ class TkUI:
             self.conv_refresh()
         elif ev == "s_msg":
             self.s_set(d["msg"], not d["ok"])
-            self.c_set(d["msg"], not d["ok"])
-        elif ev == "c_log":
-            self.log_add(self.c_log, d)
-        elif ev == "c_row":
-            self.c_rows[d["i"]].update(status=d["status"], note=d["note"])
-            self.c_render()
-        elif ev == "c_done":
-            self.c_start_btn.set_enabled(True)
+            self.cs_set(d["msg"], not d["ok"])
+        elif ev == "cs_log":
+            self.log_add(self.cs_log, d)
+        elif ev == "cs_row":
+            self.cs_rows[d["i"]].update(status=d["status"], note=d["note"])
+            self.cs_render()
+        elif ev == "cs_done":
+            self.cs_start_btn.set_enabled(True)
             if d and d.get("error"):
-                self.c_set(d["error"], True)
+                self.cs_set(d["error"], True)
                 messagebox.showwarning(a.APP_NAME, d["error"] + "\n\n아무것도 저장하지 않았어요.")
                 return
-            ok = sum(1 for r in self.c_rows if r["status"] == "완료")
-            bad = [r for r in self.c_rows if r["status"] != "완료"]
-            self.c_set(f"끝났어요: {len(self.c_rows)}분 중 {ok}분 저장", bool(bad))
+            ok = sum(1 for r in self.cs_rows if r["status"] == "완료")
+            bad = [r for r in self.cs_rows if r["status"] != "완료"]
+            self.cs_set(f"끝났어요: {len(self.cs_rows)}분 중 {ok}분 저장", bool(bad))
             if bad:
                 messagebox.showwarning(a.APP_NAME, "확인이 필요한 어르신이 있어요.\n\n"
                                        + "\n".join(f"· {r['name']}: {r['note']}" for r in bad))
@@ -1821,9 +1821,9 @@ class TkUI:
         self.s_other.paint()
         self.s_group.set(sc["group"])
         self.s_group.paint()
-        self.c_counselor.insert(0, self.api.counsel_info()["counselor"])
+        self.cs_counselor.insert(0, self.api.counsel_info()["counselor"])
         import dropfiles
-        dropfiles.install(self.root, self.c_drop)
+        dropfiles.install(self.root, self.cs_drop)
         self.root.bind_all("<MouseWheel>", self._wheel)
         self.show("daily")
         self.root.after(50, self.pump)

@@ -41,6 +41,16 @@ def _ime_cases():
     imefix._key(_Ev(t, "라"))
     imefix._focus_out(_Ev(t))
     assert t.get("1.0", "end-1c") == "가나다"
+    # 고른 글자 위에 한글을 치기 시작하면 고른 글자를 바로 지운다 (테스트 → Ctrl+A → 테)
+    imefix._select_all(_Ev(t))
+    imefix.composing = lambda w: "테"
+    imefix._key_up(_Ev(t))
+    assert t.get("1.0", "end-1c") == "" and not t.tag_ranges("sel")
+    e.delete(0, "end")
+    e.insert(0, "abc")
+    imefix._select_all(_Ev(e))
+    imefix._key_up(_Ev(e))
+    assert e.get() == ""
     imefix.install(root)
     root.destroy()
 
