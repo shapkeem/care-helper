@@ -131,3 +131,29 @@ def test_fix_date_inside_period_and_bad_fix_keeps_error():
     pc._ask_error_files([job], lambda f, c: {0: {"how": "merge", "fixes": {0: "20261026", 1: "20261031"}}}, lambda m: None)
     assert job.grid[0][pc.COL_DATE] == 20261026
     assert list(job.dropped_rows) == [1]  # 못 고친 줄은 합치면서 지움
+
+
+def test_blank_birth_and_gender_cells_do_not_end_the_data():
+    # 중간 줄의 지원사 생년월일·성별이 비어도 아래 줄까지 다 읽는다 (김순영71 32행)
+    from openpyxl import Workbook
+    ws = Workbook().active
+    ws.append(["서비스일자", "계획 시작시간", "계획 종료시간", "실적 시작시간", "실적 종료시간", "대상자명",
+               "대상자 생년월일", "대상자 성별", "생활지원사명", "생활지원사 생년월일", "생활지원사 성별", "서비스코드",
+               "거래처코드(자원)"])
+    ws.append(_row(20261104))
+    blank = _row(20261104)
+    blank[pc.COL_WORKER_BIRTH] = blank[pc.COL_WORKER_GENDER] = None
+    blank[pc.COL_BIRTH] = blank[pc.COL_GENDER] = None
+    ws.append(blank)
+    ws.append(_row(20261106))
+    grid, rows = pc.extract_data_grid(ws, lambda m: None)
+    assert rows == [2, 3, 4]
+
+
+def test_blank_worker_birth_and_gender_are_filled_from_same_worker():
+    blank = _row(20261104)
+    blank[pc.COL_WORKER_BIRTH] = blank[pc.COL_WORKER_GENDER] = None
+    job = _job([_row(20261104), blank])
+    pc._fill_worker_info_from_file(job)
+    assert job.grid[1][pc.COL_WORKER_BIRTH] == 19700101 and job.grid[1][pc.COL_WORKER_GENDER] == "여"
+    assert any("3행" in f for f in job.auto_fixes)

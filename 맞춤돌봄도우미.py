@@ -23,7 +23,7 @@ from pathlib import Path
 from html.parser import HTMLParser
 
 APP_NAME = "맞춤돌봄도우미"
-APP_VERSION = "3.5.1"
+APP_VERSION = "3.5.2"
 UPDATE_REPO = "shapkeem/care-helper"
 UPDATE_API_URL = f"https://api.github.com/repos/{UPDATE_REPO}/releases/latest"
 

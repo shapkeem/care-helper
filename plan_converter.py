@@ -525,7 +525,8 @@ COL_WORKER_GENDER = 10
 COL_CODE = 11
 COL_VENDOR = 12
 
-END_CHECK_SKIP_COLS = {COL_A_START, COL_A_END}
+# 비어 있어도 자료 끝으로 보지 않는 칸: 실적 시간(원래 빈칸), 생년월일·성별(명단에서 채움), 거래처코드(기본값)
+END_CHECK_SKIP_COLS = {COL_A_START, COL_A_END, COL_BIRTH, COL_GENDER, COL_WORKER_BIRTH, COL_WORKER_GENDER, COL_VENDOR}
 
 GROUP_COLUMN_NAME = "관리구분"  # 대상자리스트 '이용정보' 아래 칸, 값은 일반/중점
 PERIOD_COLUMNS = ("시작일자", "종료일자")  # 같은 '이용정보' 아래 칸: 서비스 기간 (기간 밖 날짜는 goodeos가 '대상자없음'으로 거절)
@@ -968,6 +969,7 @@ def scan_file(job: FileJob, ws, beneficiaries, log, worker_data=None):
     if beneficiaries is not None:
         _cross_check_beneficiaries(job, beneficiaries)
 
+    _fill_worker_info_from_file(job)
     if worker_data:  # goodeos 에서 지원사 명단을 받았을 때만
         _cross_check_workers(job, worker_data)
 
@@ -1282,6 +1284,24 @@ def _check_group_service_code(job: FileJob, rlabel, name, entry, row):
     if code in GENERAL_GROUP_FORBIDDEN_CODES:
         job.error(job.row_nums.index(rlabel), COL_CODE,
                   f"{rlabel}행 {name} 일반군인데 서비스코드 {code}({GENERAL_GROUP_FORBIDDEN_CODES[code]})가 들어감")
+
+
+def _fill_worker_info_from_file(job: FileJob):
+    # 지원사 생년월일·성별 빈칸은 같은 파일의 같은 지원사 줄 값으로 채운다
+    known = {}
+    for row in job.grid:
+        name = _norm_str(row[COL_WORKER])
+        k = known.setdefault(name, {})
+        for col in (COL_WORKER_BIRTH, COL_WORKER_GENDER):
+            if not _is_blank(row[col]):
+                k.setdefault(col, row[col])
+    for i, row in enumerate(job.grid):
+        name = _norm_str(row[COL_WORKER])
+        for col, what in ((COL_WORKER_BIRTH, "생년월일"), (COL_WORKER_GENDER, "성별")):
+            if _is_blank(row[col]) and col in known.get(name, {}):
+                row[col] = known[name][col]
+                job.auto_fixes.append(
+                    f"{job.row_nums[i]}행 {name} 생활지원사 {what} 빈칸→{_display_value(row[col])} (같은 파일의 다른 줄 기준)")
 
 
 def _cross_check_workers(job: FileJob, worker_data):
