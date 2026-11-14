@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- 파이썬판 → C#판 다리. 파이썬판 업데이트 버튼은 .exe 하나만 받으므로, 이 작은 exe 가 C#판 zip 을 받아 설치하고 켠다.
+       윈도우 10·11 에 기본으로 있는 .NET Framework 4.8 을 써서 따로 설치할 것이 없고 파일이 작다. -->
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net48</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <LangVersion>latest</LangVersion>
+    <Nullable>disable</Nullable>
+    <AssemblyName>CareHelperBridge</AssemblyName>
+    <RootNamespace>CareHelper.Bridge</RootNamespace>
+    <ApplicationIcon>..\CareHelper.App\icon.ico</ApplicationIcon>
+    <Version>3.6.0</Version>
+    <Product>CareHelper</Product>
+    <Company>CareHelper</Company>
+    <Description>CareHelper</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+
+</Project>
