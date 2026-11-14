@@ -1,0 +1,746 @@
+using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.RegularExpressions;
+using ClosedXML.Excel;
+using CareHelper.Excel;
+using static CareHelper.Plan.PlanCodes;
+using static CareHelper.Plan.PlanValues;
+
+namespace CareHelper.Plan;
+
+/// <summary>오류 파일 하나를 화면에 물어볼 내용.</summary>
+public sealed class ErrorAsk
+{
+    public int Id;
+    public string File = "", Worker = "";
+    public bool CanMerge;
+    public List<ErrorAskItem> Errors = new();
+}
+
+public sealed class ErrorAskItem
+{
+    public string Text = "";
+    public string? Field;
+    public string Value = "";
+    public List<string>? Choices;
+}
+
+/// <summary>화면의 답: 합칠지(merge) 따로 뺄지(separate), 오류 번호 → 고친 값.</summary>
+public sealed class ErrorAnswer
+{
+    public string How = "separate";
+    public Dictionary<int, string> Fixes = new();
+}
+
+public sealed record ConversionResult(string TargetFolder, int Total, int Ok, List<(string Name, string Reason)> Failed,
+                                      List<string> DeletableSources, List<string> DeletableOutputs);
+
+/// <summary>제공계획서 변환 (plan_converter.py 의 폴더·저장·통합·오류 처리).</summary>
+public static class Converter
+{
+    public const string SourceFolderName = "제공계획서 작업전";
+    public const string TargetFolderName = "제공계획서 작업후";
+    static readonly string[] TitleKeywords = { "제공", "계획서" };
+    static readonly string[] PlanHeaderMarks = { "서비스일자", "대상자명", "생활지원사명", "서비스코드" };
+    public const string MergedFileBaseName = "★통합본★";
+    public const string ErrorFilePrefix = "오류(";
+    public const string UploadedMark = "(업로드완료)";
+
+    /// <summary>시험에서 바탕화면 대신 쓸 폴더.</summary>
+    public static string? DesktopOverride;
+
+    public static string DesktopDir()
+    {
+        if (DesktopOverride != null) return DesktopOverride;
+        var d = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        if (!string.IsNullOrEmpty(d) && Directory.Exists(d)) return d;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        foreach (var p in new[] { Path.Combine(home, "OneDrive", "바탕 화면"), Path.Combine(home, "OneDrive", "Desktop"),
+                                  Path.Combine(home, "바탕 화면"), Path.Combine(home, "Desktop") })
+            if (Directory.Exists(p)) return p;
+        return home;
+    }
+
+    /// <summary>바탕화면의 '제공계획서 작업전/작업후' 폴더. 없으면 만든다.</summary>
+    public static (string Src, string Dst) WorkFolders()
+    {
+        var b = DesktopDir();
+        var src = Path.Combine(b, SourceFolderName);
+        var dst = Path.Combine(b, TargetFolderName);
+        Directory.CreateDirectory(src);
+        Directory.CreateDirectory(dst);
+        return (src, dst);
+    }
+
+    /// <summary>폴더에서 확장자가 정확히 맞는 파일 (윈도우 *.xls 가 .xlsx 까지 잡는 것을 피한다).</summary>
+    static IEnumerable<string> Glob(string folder, string ext) =>
+        Directory.EnumerateFiles(folder).Where(f => Path.GetExtension(f).Equals(ext, StringComparison.OrdinalIgnoreCase));
+
+    public static int NaturalCompareFiles(string a, string b) =>
+        Py.NaturalCompare(Path.GetFileNameWithoutExtension(a), Path.GetFileNameWithoutExtension(b));
+
+    public static List<string> FindSourceExcels(string folder)
+    {
+        var matches = new List<string>();
+        foreach (var ext in new[] { ".xlsx", ".xlsm", ".xls" })
+            matches.AddRange(Glob(folder, ext).OrderBy(f => f, StringComparer.OrdinalIgnoreCase));
+        matches = matches.Where(f => !Path.GetFileName(f).StartsWith("~$") &&
+                                     (TitleKeywords.Any(k => Path.GetFileNameWithoutExtension(f).Contains(k)) || HasPlanHeaders(f)))
+            .ToList();
+        if (matches.Count == 0)
+            throw new FileNotFoundException($"'{folder}' '{string.Join("/", TitleKeywords)}' 엑셀 파일을 찾지 못했습니다.");
+        return matches.OrderBy(f => f, Comparer<string>.Create(NaturalCompareFiles)).ToList();
+    }
+
+    /// <summary>파일 이름에 '제공/계획서'가 없어도 일정실적업로드 양식 머리글이 있으면 제공계획서로 본다.</summary>
+    public static bool HasPlanHeaders(string path)
+    {
+        try
+        {
+            var data = File.ReadAllBytes(path);
+            var texts = new List<string>();
+            if (data.Length >= 2 && data[0] == (byte)'P' && data[1] == (byte)'K')
+            {
+                using var z = new System.IO.Compression.ZipArchive(new MemoryStream(data));
+                foreach (var e in z.Entries)
+                    if (e.FullName == "xl/sharedStrings.xml" || e.FullName.StartsWith("xl/worksheets/sheet"))
+                    {
+                        using var r = new StreamReader(e.Open(), new UTF8Encoding(false, false));
+                        texts.Add(System.Net.WebUtility.HtmlDecode(r.ReadToEnd()));
+                    }
+            }
+            else
+            {
+                Encoding.RegisterProvider(CodePagesEncodingProvider.Instance);
+                texts.Add(new UTF8Encoding(false, false).GetString(data));
+                texts.Add(Encoding.GetEncoding(949).GetString(data));
+                texts.Add(Encoding.Unicode.GetString(data));
+            }
+            return texts.Any(t => PlanHeaderMarks.All(t.Contains));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    static string UniqueTargetPath(string targetFolder, string baseName)
+    {
+        var candidate = Path.Combine(targetFolder, $"{baseName}.xlsx");
+        int n = 1;
+        while (File.Exists(candidate))
+        {
+            candidate = Path.Combine(targetFolder, $"{baseName} ({n}).xlsx");
+            n++;
+        }
+        return candidate;
+    }
+
+    // ------------------------------------------------------------ 엑셀 쓰기
+    /// <summary>값을 openpyxl 이 쓰듯 그대로 쓴다 (숫자는 숫자, 글자는 글자 — "0900" 은 글자로 남는다).</summary>
+    public static void SetCell(IXLCell cell, object? value)
+    {
+        switch (value)
+        {
+            case null: break;
+            case string s: cell.Value = s; break;
+            case long l: cell.Value = l; break;
+            case int i: cell.Value = i; break;
+            case double d: cell.Value = d; break;
+            case bool b: cell.Value = b; break;
+            case DateTime dt: cell.Value = dt; break;
+            case DateOnly d0: cell.Value = d0.ToDateTime(TimeOnly.MinValue); break;
+            case TimeOnly t: cell.Value = t.ToTimeSpan(); break;
+            case TimeSpan ts: cell.Value = ts; break;
+            default: cell.Value = value.ToString(); break;
+        }
+    }
+
+    public static void WriteRows(string path, IEnumerable<object?[]> rows)
+    {
+        using var wb = new XLWorkbook();
+        var ws = wb.AddWorksheet("Sheet");
+        int r = 1;
+        foreach (var row in rows)
+        {
+            for (int c = 0; c < row.Length; c++)
+                SetCell(ws.Cell(r, c + 1), row[c]);
+            r++;
+        }
+        wb.SaveAs(path);
+    }
+
+    // ------------------------------------------------------------ 휴지통
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    struct ShFileOpStruct
+    {
+        public IntPtr hwnd;
+        public uint wFunc;
+        public string pFrom;
+        public string? pTo;
+        public ushort fFlags;
+        public int fAnyOperationsAborted;
+        public IntPtr hNameMappings;
+        public string? lpszProgressTitle;
+    }
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    static extern int SHFileOperation(ref ShFileOpStruct op);
+
+    public static bool SendToRecycleBin(IEnumerable<string> paths)
+    {
+        var list = paths.ToList();
+        if (list.Count == 0) return true;
+        var op = new ShFileOpStruct
+        {
+            wFunc = 3, // FO_DELETE
+            pFrom = string.Join("\0", list) + "\0\0",
+            fFlags = 0x40 | 0x10 | 0x4, // ALLOWUNDO | NOCONFIRMATION | SILENT
+        };
+        int result = SHFileOperation(ref op);
+        return result == 0 && op.fAnyOperationsAborted == 0;
+    }
+
+    // ------------------------------------------------------------ 통합본·업로드 파일
+    static bool IsUserXlsx(string f) => !Path.GetFileName(f).StartsWith("~$");
+
+    public static string? MergeConvertedFiles(string targetFolder, Action<string>? log = null)
+    {
+        var files = Glob(targetFolder, ".xlsx").Where(f =>
+        {
+            var stem = Path.GetFileNameWithoutExtension(f);
+            return !stem.StartsWith(MergedFileBaseName) && !stem.StartsWith(ErrorFilePrefix) && IsUserXlsx(f);
+        }).ToList();
+        if (files.Count < 2) // 파일이 하나뿐이면 통합본을 만들지 않음
+        {
+            if (files.Count > 0) log?.Invoke("변환된 파일이 하나뿐이라 통합본은 만들지 않았습니다.");
+            return null;
+        }
+        files = files.OrderBy(f => f, StringComparer.OrdinalIgnoreCase).OrderBy(f => f, Comparer<string>.Create(NaturalCompareFiles)).ToList();
+
+        var outRows = new List<object?[]>();
+        bool headerWritten = false;
+        foreach (var f in files)
+        {
+            var ws = XlsxReader.Read(File.ReadAllBytes(f), active: true);
+            int maxCol = ws.MaxColumn;
+            if (!headerWritten)
+            {
+                var head = new object?[maxCol];
+                for (int c = 1; c <= maxCol; c++) head[c - 1] = ws.Cell(1, c);
+                outRows.Add(head);
+                headerWritten = true;
+            }
+            for (int r = 2; r <= ws.MaxRow; r++)
+            {
+                var vals = new object?[maxCol];
+                for (int c = 1; c <= maxCol; c++) vals[c - 1] = ws.Cell(r, c);
+                if (vals.All(v => v == null || (v is string s && s.Trim() == ""))) continue;
+                outRows.Add(vals);
+            }
+        }
+        var outPath = UniqueTargetPath(targetFolder, MergedFileBaseName);
+        WriteRows(outPath, outRows);
+        log?.Invoke($"{Path.GetFileName(outPath)} 저장 완료 (총 {outRows.Count}행)");
+        return outPath;
+    }
+
+    /// <summary>올릴 파일: 가장 최근 통합본. 변환 파일이 하나뿐이라 통합본이 없으면 그 파일. 없으면 null.</summary>
+    public static string? FindUploadFile(string targetFolder)
+    {
+        var files = Glob(targetFolder, ".xlsx").Where(f =>
+        {
+            var stem = Path.GetFileNameWithoutExtension(f);
+            return IsUserXlsx(f) && !stem.Contains(UploadedMark) && !stem.StartsWith(ErrorFilePrefix);
+        }).ToList();
+        var merged = files.Where(f => Path.GetFileNameWithoutExtension(f).StartsWith(MergedFileBaseName)).ToList();
+        if (merged.Count > 0)
+            return merged.OrderByDescending(f => File.GetLastWriteTimeUtc(f)).First();
+        return files.Count == 1 ? files[0] : null;
+    }
+
+    public static int CountDataRows(string path)
+    {
+        var ws = XlsxReader.Read(File.ReadAllBytes(path), active: true);
+        return ws.Rows(2).Count(r => r.Any(v => v != null && !(v is string s && s == "")));
+    }
+
+    /// <summary>다시 올려 일정이 중복되지 않게 이름에 '(업로드완료)'를 붙인다. → 새 경로</summary>
+    public static string MarkUploaded(string path)
+    {
+        var dir = Path.GetDirectoryName(path)!;
+        var stem = Path.GetFileNameWithoutExtension(path);
+        var ext = Path.GetExtension(path);
+        var neu = Path.Combine(dir, $"{stem}{UploadedMark}{ext}");
+        int n = 2;
+        while (File.Exists(neu))
+        {
+            neu = Path.Combine(dir, $"{stem}{UploadedMark}({n}){ext}");
+            n++;
+        }
+        File.Move(path, neu);
+        return neu;
+    }
+
+    public static List<string> Leftovers(string dst) => Glob(dst, ".xlsx").Where(IsUserXlsx).ToList();
+
+    // ------------------------------------------------------------ 파일 이름·로그
+    static ((int, int)?, (int, int)?) DataDateRange(FileJob job)
+    {
+        var dates = job.Grid.Select(r => NormalizeDate(r[ColDate])).Where(d => d != null).Select(d => d!.Value).ToList();
+        if (dates.Count == 0) return (null, null);
+        long lo = dates.Min(), hi = dates.Max();
+        return (((int)(lo % 10000 / 100), (int)(lo % 100)), ((int)(hi % 10000 / 100), (int)(hi % 100)));
+    }
+
+    public static string OutputBaseName(FileJob job)
+    {
+        var name = job.WorkerName;
+        var (start, end) = (job.FileDateStart, job.FileDateEnd);
+        if (start == null)
+        {
+            (start, end) = DataDateRange(job);
+            if (end == start) end = null;
+        }
+        var datePart = "";
+        if (start is (int sm, int sd))
+        {
+            datePart = $" {sm}월{sd}일";
+            if (end is (int em, int ed) && end != start)
+                datePart += $"-{em}월{ed}일";
+        }
+        var revPart = job.IsRevision ? "(수정)" : "";
+        if (job.Errors.Count > 0)
+            return $"{ErrorFilePrefix}{name}){datePart}{revPart}";
+        return $"{name}{datePart}{revPart}";
+    }
+
+    static void CheckFilenameVsData(FileJob job, Action<string> log)
+    {
+        if (job.FileDateStart == null)
+        {
+            log($"  [확인필요] 파일명에서 날짜를 읽지 못했습니다: {job.FileName}");
+            return;
+        }
+        var (dataStart, dataEnd) = DataDateRange(job);
+        if (dataStart == null) return;
+        var fs = job.FileDateStart.Value;
+        if (dataStart != fs)
+            log($"  [확인필요] 파일명 시작일({fs.M}월{fs.D}일)과 데이터 시작일({dataStart.Value.Item1}월{dataStart.Value.Item2}일)이 다릅니다.");
+        if (job.FileDateEnd is (int em, int ed) && dataEnd != (em, ed))
+            log($"  [확인필요] 파일명 종료일({em}월{ed}일)과 데이터 마지막 날짜({dataEnd!.Value.Item1}월{dataEnd.Value.Item2}일)가 다릅니다.");
+    }
+
+    public static (int? Row, string Text) SplitRow(string msg)
+    {
+        var m = Regex.Match(msg, @"^\s*(\d+)행\s*(.*)", RegexOptions.Singleline);
+        if (m.Success) return (Py.ToInt(m.Groups[1].Value), m.Groups[2].Value);
+        return (null, msg);
+    }
+
+    static void LogFileBlock(Action<string> log, string tag, string name, List<string> messages)
+    {
+        var items = messages.Select(SplitRow).OrderBy(x => x.Row == null).ThenBy(x => x.Row ?? 0).ToList();
+        log($"{tag} {name} ({items.Count}건)");
+        foreach (var (row, text) in items)
+            log(row == null ? $"          {text}" : $"    {row,3}행   {text}");
+    }
+
+    static void LogFinalSummary(List<FileJob> jobs, Action<string> log)
+    {
+        var errorJobs = jobs.Where(j => j.Errors.Count > 0).ToList();
+        var droppedJobs = jobs.Where(j => j.DroppedRows.Count > 0).ToList();
+        if (errorJobs.Count > 0)
+        {
+            log("");
+            log($"오류 파일 {errorJobs.Count}개는 통합본에서 제외합니다:");
+            foreach (var j in errorJobs)
+                LogFileBlock(log, "[오류]", j.WorkerName, j.Errors);
+        }
+        if (droppedJobs.Count > 0)
+        {
+            log("");
+            log($"잘못된 줄을 삭제하고 저장한 파일 {droppedJobs.Count}개:");
+            foreach (var j in droppedJobs)
+                LogFileBlock(log, "[줄 삭제]", j.WorkerName, j.DroppedRows.Values.ToList());
+        }
+    }
+
+    /// <summary>카톡에서 두 번 받아 '(1)'이 붙은 것처럼 내용이 똑같은 파일은 하나만 쓴다.</summary>
+    public static List<string> DropSameFiles(List<string> files, Action<string> log)
+    {
+        var seen = new Dictionary<string, string>();
+        var kept = new List<string>();
+        foreach (var f in files)
+        {
+            var key = Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(f)));
+            if (seen.TryGetValue(key, out var first))
+            {
+                log($"[같은 파일] '{Path.GetFileName(f)}'은(는) '{Path.GetFileName(first)}'과(와) 내용이 똑같아서 빼고 하나만 변환해요.");
+                continue;
+            }
+            seen[key] = f;
+            kept.Add(f);
+        }
+        return kept;
+    }
+
+    static long? RowDate(FileJob job, int i, Dictionary<int, string> approved)
+    {
+        foreach (var p in job.Proposals)
+            if (p.Cells.Contains((i, ColDate)) && approved.TryGetValue(p.Pid, out var v))
+                return NormalizeDate(v);
+        return NormalizeDate(job.Grid[i][ColDate]);
+    }
+
+    public static void CheckServicePeriod(FileJob job, Dictionary<int, string> approved)
+    {
+        foreach (var (i, entry) in job.RowEntries.ToList())
+        {
+            var d = RowDate(job, i, approved);
+            if (d == null || job.DroppedRows.ContainsKey(i)) continue;
+            if ((entry.End is long end && end != 0 && d > end) || (entry.Start is long st && st != 0 && d < st))
+                job.Error(i, ColDate, $"{job.RowNums[i]}행 {entry.DisplayName} {Fmt(d)} 일정이 " +
+                                      $"서비스 기간({Fmt(entry.Start)}~{Fmt(entry.End)}) 밖이에요 (goodeos가 '대상자없음'으로 거절)");
+        }
+    }
+
+    /// <summary>오류 문구의 'N행' → 그 줄 번호들. 줄을 못 찾는 오류가 있으면 null.</summary>
+    public static Dictionary<int, List<string>>? ErrorRows(FileJob job)
+    {
+        var idx = new Dictionary<int, int>();
+        for (int i = 0; i < job.RowNums.Count; i++) idx[job.RowNums[i]] = i;
+        var rows = new Dictionary<int, List<string>>();
+        foreach (var msg in job.Errors)
+        {
+            var (n, _) = SplitRow(msg);
+            if (n == null || !idx.TryGetValue(n.Value, out var i)) return null;
+            if (!rows.TryGetValue(i, out var l)) rows[i] = l = new();
+            l.Add(msg);
+        }
+        return rows;
+    }
+
+    public static List<string>? FixChoices(FileJob job, int col)
+    {
+        if (col == ColCode)
+            return ServiceCodeList.Select(x => $"{x.Code} {x.Name}").ToList();
+        if (col == ColName && job.BeneficiaryIndex is { Count: > 0 })
+        {
+            var worker = job.WorkerName;
+            return job.BeneficiaryIndex.Values.SelectMany(g => g).Where(e => e.Worker == worker)
+                .Select(e => e.DisplayName).OrderBy(x => x, StringComparer.Ordinal).ToList();
+        }
+        if (col == ColWorker && job.WorkerData is { Count: > 0 })
+            return job.WorkerData.Keys.OrderBy(x => x, StringComparer.Ordinal).ToList();
+        return null;
+    }
+
+    static string? PeriodProblem(Beneficiary? entry, long? d)
+    {
+        if (entry == null || d == null) return null;
+        if ((entry.End is long end && end != 0 && d > end) || (entry.Start is long st && st != 0 && d < st))
+            return $"{Fmt(d)}은(는) 서비스 기간({Fmt(entry.Start)}~{Fmt(entry.End)}) 밖이에요.";
+        return null;
+    }
+
+    /// <summary>오류 칸에 새로 넣은 값 확인 → (문제, {칸: 값}, 대상자). 문제가 없으면 (null, 바꿀 값들, …).</summary>
+    public static (string? Problem, Dictionary<int, object?> Values, Beneficiary? Entry) CheckFix(FileJob job, int i, int col, string? text)
+    {
+        text = (text ?? "").Trim();
+        var first = text.Length > 0 ? Py.SplitWs(text)[0] : "";
+        var row = job.Grid[i];
+        var none = new Dictionary<int, object?>();
+        if (first.Length == 0) return ("값을 넣어 주세요.", none, null);
+        if (col == ColCode)
+        {
+            var code = CleanServiceCode(first);
+            if (!ServiceCodes.ContainsKey(code)) return ($"서비스코드 '{code}'는 코드표에 없어요.", none, null);
+            if (job.RowEntries.TryGetValue(i, out var entry) && entry.Group.StartsWith("일반", StringComparison.Ordinal) &&
+                GeneralGroupForbiddenCodes.TryGetValue(code, out var cn))
+                return ($"일반군 어르신에게는 {code}({cn})를 넣을 수 없어요.", none, null);
+            return (null, new() { [ColCode] = code }, null);
+        }
+        if (col == ColName)
+        {
+            var entries = (job.BeneficiaryIndex ?? new()).Values.SelectMany(g => g)
+                .Where(e => first == e.DisplayName || first == e.Name).ToList();
+            var exact = entries.Where(e => e.DisplayName == first).ToList();
+            if (exact.Count == 1) entries = exact;
+            if (entries.Count == 0) return ($"'{first}' 어르신이 대상자리스트에 없어요.", none, null);
+            if (entries.Count > 1) return ($"'{first}' 동명이인이 있어요. 목록에서 A/B가 붙은 이름으로 골라 주세요.", none, null);
+            var e = entries[0];
+            var problem = PeriodProblem(e, NormalizeDate(row[ColDate]));
+            if (problem != null) return (problem, none, null);
+            return (null, new()
+            {
+                [ColName] = e.DisplayName, [ColBirth] = e.Birth,
+                [ColGender] = e.Gender.Length > 0 ? e.Gender : row[ColGender],
+            }, e);
+        }
+        if (col == ColDate)
+        {
+            var d = NormalizeDate(first);
+            if (d == null || d.Value.ToString().Length != 8) return ("날짜는 20261027처럼 넣어 주세요.", none, null);
+            if (ToDate(d.Value) == null) return ($"{d}는 달력에 없는 날짜예요.", none, null);
+            job.RowEntries.TryGetValue(i, out var entry);
+            var problem = PeriodProblem(entry, d);
+            return problem != null ? (problem, none, null) : (null, new() { [ColDate] = d.Value }, null);
+        }
+        if (col == ColEnd)
+        {
+            var t = NormalizeTime(first);
+            var s = NormalizeTime(row[ColStart]);
+            if (t == null) return ("시간은 1430처럼 넣어 주세요.", none, null);
+            int need = EduCodes.ContainsKey(CleanServiceCode(row[ColCode])) ? EduMinMinutes : MinMinutes;
+            if (s != null && TimeToMinutes(t) - TimeToMinutes(s) < need)
+                return ($"시작({s})부터 {need}분 이상이어야 해요.", none, null);
+            return (null, new() { [ColEnd] = t }, null);
+        }
+        if (col == ColWorker)
+        {
+            if (job.WorkerData is { Count: > 0 } && !job.WorkerData.ContainsKey(first))
+                return ($"'{first}' 선생님이 생활지원사 명단에 없어요.", none, null);
+            return (null, new() { [ColWorker] = first }, null);
+        }
+        return ("이 오류는 고칠 수 없어요.", none, null);
+    }
+
+    static bool ApplyFix(FileJob job, string msg, string text, Action<string> log)
+    {
+        var (i, col) = job.ErrorCells[msg];
+        var (problem, values, entry) = CheckFix(job, i, col, text);
+        if (problem != null)
+        {
+            log($"  [수정 안 됨] {msg}: {problem}");
+            return false;
+        }
+        if (entry != null) job.RowEntries[i] = entry;
+        var old = DisplayValue(job.Grid[i][col]);
+        foreach (var (c, v) in values) job.Grid[i][c] = v;
+        // 같은 칸을 바꾸는 수정 제안이 뒤에서 덮어쓰지 않게
+        job.Proposals = job.Proposals.Where(p => !values.Keys.Any(c => p.Cells.Contains((i, c)))).ToList();
+        job.Errors.Remove(msg);
+        log($"[수정] {job.WorkerName} {job.RowNums[i]}행 {FixFields[col]} '{old}' → '{Py.Str(values[col])}'");
+        return true;
+    }
+
+    public delegate Dictionary<int, ErrorAnswer>? ErrorCallback(List<ErrorAsk> asks, Func<int, int, string, string?> check);
+
+    static void AskErrorFiles(List<FileJob> jobs, ErrorCallback? errorCallback, Action<string> log)
+    {
+        var errorJobs = jobs.Where(j => j.Errors.Count > 0).ToList();
+        if (errorJobs.Count == 0 || errorCallback == null) return;
+        var msgs = errorJobs.Select(j => j.Errors.ToList()).ToList();
+        var asks = new List<ErrorAsk>();
+        for (int k = 0; k < errorJobs.Count; k++)
+        {
+            var j = errorJobs[k];
+            var ask = new ErrorAsk { Id = k, File = j.FileName, Worker = j.WorkerName, CanMerge = ErrorRows(j) != null };
+            foreach (var m in msgs[k])
+            {
+                bool has = j.ErrorCells.TryGetValue(m, out var cell);
+                bool fixable = has && FixFields.ContainsKey(cell.Col);
+                ask.Errors.Add(new ErrorAskItem
+                {
+                    Text = m, Field = fixable ? FixFields[cell.Col] : null,
+                    Value = fixable ? DisplayValue(j.Grid[cell.Row][cell.Col]) : "",
+                    Choices = fixable ? FixChoices(j, cell.Col) : null,
+                });
+            }
+            asks.Add(ask);
+        }
+
+        string? Check(int k, int e, string text)
+        {
+            var j = errorJobs[k];
+            var (i, col) = j.ErrorCells[msgs[k][e]];
+            return CheckFix(j, i, col, text).Problem;
+        }
+
+        var answer = errorCallback(asks, Check) ?? new();
+        for (int k = 0; k < errorJobs.Count; k++)
+        {
+            var j = errorJobs[k];
+            var a = answer.TryGetValue(k, out var x) ? x : new ErrorAnswer();
+            foreach (var (e, text) in a.Fixes)
+                ApplyFix(j, msgs[k][e], text, log);
+            if (j.Errors.Count == 0)
+            {
+                log($"[수정 완료] {j.WorkerName}: 오류를 다 고쳐서 통합본에 넣어요.");
+                continue;
+            }
+            var rows = ErrorRows(j);
+            if (a.How != "merge" || rows == null) continue;
+            foreach (var (i, ms) in rows)
+                j.DroppedRows[i] = string.Join(" / ", ms);
+            log($"[합침] {j.WorkerName}: 오류 {j.Errors.Count}건이 있는 {rows.Count}줄만 지우고 통합본에 넣어요.");
+            j.Errors = new();
+        }
+    }
+
+    public static ConversionResult Run(Action<string> log, string? rosterPath, Dictionary<string, WorkerInfo>? workerData = null,
+                                       Action<int, int>? onProgress = null,
+                                       Func<List<FixProposal>, Dictionary<int, string>?>? reviewCallback = null,
+                                       ErrorCallback? errorCallback = null)
+    {
+        var (sourceFolder, targetFolder) = WorkFolders();
+        Dictionary<string, List<Beneficiary>>? beneficiaries = null;
+        if (!string.IsNullOrEmpty(rosterPath))
+        {
+            try
+            {
+                beneficiaries = Beneficiaries.Load(rosterPath);
+                int n = beneficiaries.Values.Sum(v => v.Count);
+                log($"대상자리스트 {n}명 읽기 완료 ({Path.GetFileName(rosterPath)})");
+            }
+            catch (Exception e)
+            {
+                log($"[경고] 대상자리스트를 읽지 못해 대상자 확인은 건너뜁니다: {e.Message}");
+            }
+        }
+        if (workerData is { Count: > 0 })
+            log($"생활지원사 명단 {workerData.Count}명 (goodeos)");
+
+        var srcFiles = DropSameFiles(FindSourceExcels(sourceFolder), log);
+        int total = srcFiles.Count;
+        log($"대상 파일 {total}개 발견");
+        onProgress?.Invoke(0, total);
+
+        var jobs = new List<FileJob>();
+        var failed = new List<(string, string)>();
+        for (int i = 0; i < srcFiles.Count; i++)
+        {
+            var src = srcFiles[i];
+            log($"검사 중: {Path.GetFileName(src)}");
+            var job = new FileJob(src);
+            try
+            {
+                var ws = SheetLoader.LoadActive(src);
+                Scanner.ScanFile(job, ws, beneficiaries, log, workerData);
+                if (job.LoadError != null)
+                {
+                    log($"  -> {job.LoadError}, 건너뜁니다.");
+                    failed.Add((Path.GetFileName(src), job.LoadError));
+                }
+                else
+                    jobs.Add(job);
+            }
+            catch (Exception e)
+            {
+                log($"  -> [실패] {e.Message}");
+                failed.Add((Path.GetFileName(src), e.Message));
+            }
+            finally
+            {
+                onProgress?.Invoke(i + 1, total);
+            }
+        }
+
+        var allProposals = jobs.SelectMany(j => j.Proposals).ToList();
+        // 형식 통일·코드 정리·연도 보정은 사람이 볼 필요 없이 바로 적용한다
+        var approved = allProposals.Where(p => p.Auto).ToDictionary(p => p.Pid, p => p.SuggestedDisp);
+        var toReview = allProposals.Where(p => !p.Auto).ToList();
+        if (toReview.Count > 0)
+        {
+            log("");
+            log($"승인이 필요한 수정 제안 {toReview.Count}건 발견 - 검토 창을 확인하세요.");
+            reviewCallback ??= ps => ps.ToDictionary(p => p.Pid, p => p.SuggestedDisp);
+            foreach (var (k, v) in reviewCallback(toReview) ?? new())
+                approved[k] = v;
+        }
+
+        // 서비스 기간은 날짜 보정이 끝난 뒤에 본다 (연도 보정 전 날짜로 보면 틀림)
+        foreach (var job in jobs)
+        {
+            job.BeneficiaryIndex = beneficiaries;
+            job.WorkerData = workerData;
+            CheckServicePeriod(job, approved);
+        }
+        AskErrorFiles(jobs, errorCallback, log);
+
+        int success = 0, applied = 0, skipped = 0;
+        var deletableSources = new List<string>();
+        var deletableOutputs = new List<string>();
+        foreach (var job in jobs)
+        {
+            log($"저장 중: {job.FileName}");
+            foreach (var msg in job.AutoFixes) log($"  [자동수정] {msg}");
+            foreach (var msg in job.Warnings) log($"  [확인필요] {msg}");
+
+            foreach (var p in job.Proposals)
+            {
+                if (!approved.TryGetValue(p.Pid, out var val))
+                {
+                    skipped++;
+                    log($"  [건너뜀] {p.RowLabel}행 {p.Kind}: {p.CurrentDisp} → {p.SuggestedDisp}");
+                    continue;
+                }
+                object[] values;
+                try
+                {
+                    values = p.BuildValues(val);
+                }
+                catch (PlanValueError e)
+                {
+                    skipped++;
+                    log($"  [건너뜀] {p.RowLabel}행 {p.Kind}: 입력값 오류 ({e.Message})");
+                    continue;
+                }
+                for (int k = 0; k < Math.Min(p.Cells.Count, values.Length); k++)
+                    job.Grid[p.Cells[k].Row][p.Cells[k].Col] = values[k];
+                applied++;
+                log($"  [{(p.Auto ? "자동수정" : "수정")}] {p.RowLabel}행 {p.Kind}: {p.CurrentDisp} → {val}");
+            }
+
+            foreach (var msg in job.Errors) log($"  [오류] {msg}");
+            foreach (var i in job.DroppedRows.Keys.OrderBy(x => x))
+                log($"  [줄 삭제] {job.DroppedRows[i]} → 이 줄을 빼고 저장합니다");
+
+            CheckFilenameVsData(job, log);
+
+            try
+            {
+                var rows = new List<object?[]> { StandardHeaders.Cast<object?>().ToArray() };
+                rows.AddRange(job.Grid.Where((_, i) => !job.DroppedRows.ContainsKey(i)));
+                var outPath = UniqueTargetPath(targetFolder, OutputBaseName(job));
+                WriteRows(outPath, rows);
+                var outStem = Path.GetFileNameWithoutExtension(outPath);
+                if (job.Errors.Count > 0)
+                    log($"  -> [{outStem}] 저장 완료 (오류 {job.Errors.Count}건 - 통합본에서 제외)");
+                else
+                {
+                    log($"  -> [{outStem}] 저장 완료");
+                    deletableSources.Add(job.SrcPath);
+                    deletableOutputs.Add(outPath);
+                }
+                success++;
+            }
+            catch (Exception e)
+            {
+                log($"  -> [실패] {e.Message}");
+                failed.Add((job.FileName, e.Message));
+            }
+        }
+
+        if (allProposals.Count > 0)
+        {
+            log("");
+            log($"수정 제안 처리 결과: 적용 {applied}건 / 건너뜀 {skipped}건");
+        }
+
+        try
+        {
+            var merged = MergeConvertedFiles(targetFolder, log);
+            if (merged != null) deletableOutputs.Add(merged);
+        }
+        catch (Exception e)
+        {
+            log($"통합본 생성 중 오류: {e.Message}");
+        }
+
+        LogFinalSummary(jobs, log);
+        return new ConversionResult(targetFolder, total, success, failed, deletableSources, deletableOutputs);
+    }
+}

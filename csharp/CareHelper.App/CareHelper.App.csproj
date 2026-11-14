@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>맞춤돌봄도우미</AssemblyName>
+    <RootNamespace>CareHelper.App</RootNamespace>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
+    <Version>3.6.0</Version>
+    <Product>CareHelper</Product>
+    <Company>CareHelper</Company>
+    <Description>CareHelper</Description>
+    <SatelliteResourceLanguages>ko</SatelliteResourceLanguages>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CareHelper.Core\CareHelper.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Resource Include="icon.ico" />
+  </ItemGroup>
+
+</Project>

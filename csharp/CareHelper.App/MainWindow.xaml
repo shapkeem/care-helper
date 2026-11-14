@@ -1,0 +1,310 @@
+﻿<Window x:Class="CareHelper.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="맞춤돌봄도우미" Width="1040" Height="820" MinWidth="900" MinHeight="640"
+        Background="{StaticResource Bg}" FontFamily="{StaticResource Ui}" Icon="icon.ico"
+        AllowDrop="True" UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+    <Grid>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="210"/>
+            <ColumnDefinition Width="1"/>
+            <ColumnDefinition Width="*"/>
+        </Grid.ColumnDefinitions>
+
+        <!-- 왼쪽 메뉴 -->
+        <DockPanel Background="{StaticResource Side}">
+            <TextBlock DockPanel.Dock="Top" Text="맞춤돌봄도우미" FontSize="17" FontWeight="Bold" Margin="18,18,18,14"/>
+            <StackPanel DockPanel.Dock="Bottom" Margin="0,0,0,14">
+                <Border Height="1" Background="{StaticResource Line}" Margin="0,0,0,8"/>
+                <StackPanel x:Name="NavBottom"/>
+                <Border x:Name="Pill" HorizontalAlignment="Left" Margin="18,8,0,2" CornerRadius="10" Padding="10,2" Background="#F1F5F9">
+                    <TextBlock x:Name="PillText" Text="●  상태 확인 중..." FontSize="11" FontWeight="SemiBold" Foreground="#475569"/>
+                </Border>
+                <Border x:Name="Pill2" HorizontalAlignment="Left" Margin="18,2,0,2" CornerRadius="10" Padding="10,2" Visibility="Collapsed">
+                    <TextBlock x:Name="Pill2Text" FontSize="11" FontWeight="SemiBold"/>
+                </Border>
+                <Button x:Name="UpdBtn" Style="{StaticResource BtnUpdate}" Content="업데이트" HorizontalAlignment="Left" Margin="18,6,0,0"
+                        Visibility="Collapsed" Click="UpdBtn_Click"/>
+                <TextBlock x:Name="Ver" FontSize="11" Foreground="{StaticResource Muted}" Margin="22,6,0,0"/>
+            </StackPanel>
+            <StackPanel x:Name="NavTop"/>
+        </DockPanel>
+        <Border Grid.Column="1" Background="{StaticResource Line}"/>
+
+        <Grid Grid.Column="2" Margin="26,20,26,12">
+            <!-- ======================== 일일실적 점검 ======================== -->
+            <DockPanel x:Name="PageDaily">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <Button x:Name="DBtn" DockPanel.Dock="Right" Style="{StaticResource BtnPrimary}" Content="점검 시작" VerticalAlignment="Top" Click="DCheck_Click"/>
+                    <StackPanel>
+                        <TextBlock Text="일일실적 점검" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock x:Name="DSub" FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBlock x:Name="DProg" DockPanel.Dock="Top" Text="준비됐어요. 점검 시작을 눌러 주세요." FontSize="12" Foreground="{StaticResource Muted}"/>
+                <ProgressBar x:Name="DBar" DockPanel.Dock="Top" Height="4" Margin="0,4,0,12" Maximum="100" Foreground="{StaticResource Primary}"
+                             Background="{StaticResource Card}" BorderThickness="0"/>
+                <UniformGrid x:Name="DCards" DockPanel.Dock="Top" Rows="1" Columns="4"/>
+                <DockPanel DockPanel.Dock="Top" Margin="0,14,0,4">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="전체 복사" Click="DCopyAll_Click"/>
+                    <Button x:Name="DFillAll" DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="모두 실적 넣기" Margin="0,0,6,0"
+                            Visibility="Collapsed" Click="DFillAll_Click"/>
+                    <TextBlock x:Name="DTitle" Text="실적 확인이 필요한 사람" FontSize="14.5" FontWeight="Bold" VerticalAlignment="Center"/>
+                </DockPanel>
+                <Border Style="{StaticResource ListBorder}">
+                    <ScrollViewer x:Name="DScroll" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="DList"/>
+                    </ScrollViewer>
+                </Border>
+            </DockPanel>
+
+            <!-- ======================== 카톡 요청 처리 ======================== -->
+            <DockPanel x:Name="PageKakao" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Style="{StaticResource Btn}" Content="멈춤" Click="KStop_Click" Margin="0,0,6,0"/>
+                        <Button x:Name="KStartBtn" Style="{StaticResource Btn}" Content="읽기" Click="KStart_Click" Margin="0,0,6,0"/>
+                        <Button x:Name="KRunBtn" Style="{StaticResource BtnPrimary}" Content="실행" Click="KRun_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="카톡 요청 처리" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text="붙여 넣고 [읽기] → 표 확인 → [실행]. 노란 칸만 채우면 돼요." FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBox x:Name="KText" DockPanel.Dock="Top" Height="100" AcceptsReturn="True" TextWrapping="Wrap"
+                         VerticalScrollBarVisibility="Auto" Margin="0,2,0,6"/>
+                <TextBlock x:Name="KStatus" DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                <Border x:Name="KQ" DockPanel.Dock="Top" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12"
+                        Padding="14,10" Margin="0,6" Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock x:Name="KQText" FontSize="13" FontWeight="Bold" TextWrapping="Wrap"/>
+                        <WrapPanel x:Name="KQOpts" Margin="0,6"/>
+                        <DockPanel>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="건너뛰기" Margin="6,0,0,0" Click="KSkip_Click"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmallPrimary}" Content="답하기" Margin="6,0,0,0" Click="KSend_Click"/>
+                            <TextBox x:Name="KQIn" KeyDown="KQIn_KeyDown" Height="32" VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+                <RichTextBox x:Name="KLog" DockPanel.Dock="Bottom" Style="{StaticResource LogBox}" Height="92" Margin="0,8,0,0"/>
+                <Border x:Name="KHdr" DockPanel.Dock="Top" Background="{StaticResource Card}" CornerRadius="8,8,0,0" Padding="6,4" Margin="0,8,0,0">
+                    <Grid x:Name="KHdrGrid"/>
+                </Border>
+                <Border Style="{StaticResource ListBorder}" CornerRadius="0,0,10,10">
+                    <ScrollViewer x:Name="KScroll" VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="KTable"/>
+                    </ScrollViewer>
+                </Border>
+            </DockPanel>
+
+            <!-- ======================== 제공계획서 변환 ======================== -->
+            <DockPanel x:Name="PageConv" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Style="{StaticResource Btn}" Content="작업전 폴더" Margin="0,0,6,0" Click="COpenSrc_Click"/>
+                        <Button Style="{StaticResource Btn}" Content="결과 폴더" Margin="0,0,6,0" Click="COpenDst_Click"/>
+                        <Button x:Name="CStart" Style="{StaticResource BtnPrimary}" Content="변환 시작" Margin="0,0,6,0" Click="CStart_Click"/>
+                        <Button x:Name="CUpload" Style="{StaticResource Btn}" Content="업로드" Click="CUpload_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="제공계획서 변환" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text="바탕화면 '제공계획서 작업전' 엑셀을 정리·검사해서 '작업후' 폴더에 저장하고 통합본을 만들어요."
+                                   FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+                <UniformGrid x:Name="CCards" DockPanel.Dock="Top" Rows="1" Columns="3"/>
+                <Border x:Name="CWarnBox" DockPanel.Dock="Top" Background="{StaticResource WarnBg}" CornerRadius="12" Padding="12,8" Margin="0,8,0,0" Visibility="Collapsed">
+                    <TextBlock x:Name="CWarn" FontSize="12" Foreground="{StaticResource WarnFg}" TextWrapping="Wrap"/>
+                </Border>
+                <Border x:Name="CLeft" DockPanel.Dock="Top" Background="{StaticResource WarnBg}" CornerRadius="12" Padding="12,6" Margin="0,8,0,0" Visibility="Collapsed">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource BtnTiny}" Content="휴지통으로" Click="CClearLeft_Click"/>
+                        <TextBlock x:Name="CLeftText" FontSize="12" Foreground="{StaticResource WarnFg}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <TextBlock x:Name="CProg" DockPanel.Dock="Top" Text="변환 시작을 누르면 시작해요." FontSize="12" Foreground="{StaticResource Muted}" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                <ProgressBar x:Name="CBar" DockPanel.Dock="Top" Height="4" Margin="0,4,0,8" Maximum="100" Foreground="{StaticResource Primary}"
+                             Background="{StaticResource Card}" BorderThickness="0"/>
+                <!-- 수정 제안 검토 -->
+                <Border x:Name="CReview" DockPanel.Dock="Top" BorderBrush="#93C5FD" BorderThickness="2" CornerRadius="12" Padding="10,8" Margin="0,0,0,8" Visibility="Collapsed">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top" Orientation="Horizontal">
+                            <TextBlock Text="수정 제안 검토" FontSize="14.5" FontWeight="Bold"/>
+                            <TextBlock Text="  체크한 항목만 고쳐요. 수정값을 누르면 직접 고칠 수 있어요." FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <DockPanel DockPanel.Dock="Bottom">
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmallPrimary}" Content="체크한 항목 적용하고 계속" Click="RvApply_Click"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="모두 건너뛰고 계속" Margin="0,0,6,0" Click="RvSkip_Click"/>
+                            <TextBlock x:Name="RvCount" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border Style="{StaticResource ListBorder}" Margin="0,6" MaxHeight="260">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="RvList"/>
+                            </ScrollViewer>
+                        </Border>
+                    </DockPanel>
+                </Border>
+                <!-- 오류 파일 -->
+                <Border x:Name="CErrs" DockPanel.Dock="Top" BorderBrush="#FCA5A5" BorderThickness="2" CornerRadius="12" Padding="10,8" Margin="0,0,0,8" Visibility="Collapsed">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock Text="오류가 있는 파일" FontSize="14.5" FontWeight="Bold"/>
+                            <TextBlock Text="칸에 맞는 값을 넣으면 고쳐서 넣어요. 못 고친 줄은 합치면 지우고, 따로 빼면 파일째 '오류(이름)'으로 남겨요."
+                                       FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                        </StackPanel>
+                        <DockPanel DockPanel.Dock="Bottom">
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmallPrimary}" Content="고른 대로 계속" Click="ErApply_Click"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="모두 합치기" Margin="0,0,6,0" Click="ErMergeAll_Click"/>
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="모두 따로 빼기" Margin="0,0,6,0" Click="ErSeparateAll_Click"/>
+                            <TextBlock x:Name="ErCount" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
+                        </DockPanel>
+                        <Border Style="{StaticResource ListBorder}" Margin="0,6" MaxHeight="300">
+                            <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                <StackPanel x:Name="ErList"/>
+                            </ScrollViewer>
+                        </Border>
+                    </DockPanel>
+                </Border>
+                <Border x:Name="CDone" DockPanel.Dock="Top" Background="{StaticResource OkBg}" CornerRadius="12" Padding="12,6" Margin="0,0,0,8" Visibility="Collapsed">
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource BtnTiny}" Content="원본·결과 휴지통으로" Click="CDelete_Click"/>
+                        <TextBlock Text="변환이 끝났어요. 다 확인했으면 원본과 결과를 정리할 수 있어요." FontSize="12" Foreground="{StaticResource OkFg}" VerticalAlignment="Center"/>
+                    </DockPanel>
+                </Border>
+                <RichTextBox x:Name="CLog" Style="{StaticResource LogBox}"/>
+            </DockPanel>
+
+            <!-- ======================== 서비스 제공계획 입력 ======================== -->
+            <DockPanel x:Name="PageScare" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Style="{StaticResource Btn}" Content="s-care 열기" Margin="0,0,6,0" Click="SOpen_Click"/>
+                        <Button x:Name="SStartBtn" Style="{StaticResource BtnPrimary}" Content="입력 시작" Click="SStart_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="서비스 제공계획 입력" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text="s-care에 서비스 제공계획을 입력하고 저장해요. 로그인은 크롬 창에서 직접 해 주세요."
+                                   FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,8">
+                    <StackPanel Margin="0,0,18,0">
+                        <TextBlock Text="계획자" FontSize="12" Foreground="{StaticResource Muted}"/>
+                        <TextBox x:Name="SPlanner" Width="150"/>
+                    </StackPanel>
+                    <StackPanel x:Name="SOtherBox" Margin="0,0,18,0"/>
+                    <StackPanel x:Name="SGroupBox" Margin="0,0,18,0"/>
+                </StackPanel>
+                <TextBlock DockPanel.Dock="Top" Text="어르신 이름을 한 줄에 한 분씩 적어 주세요. 군이 다르면 이름 뒤에 '중점' 또는 '일반'을 붙여요. (예: 김영희 중점)"
+                           FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                <TextBox x:Name="SNames" DockPanel.Dock="Top" Height="126" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" Margin="0,2,0,6"/>
+                <TextBlock x:Name="SMsg" DockPanel.Dock="Top" Text="계획자·타서비스 연계·기본 군은 이 PC에 기억돼요." FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                <RichTextBox x:Name="SLog" DockPanel.Dock="Bottom" Style="{StaticResource LogBox}" Height="92" Margin="0,8,0,0"/>
+                <Border DockPanel.Dock="Top" Background="{StaticResource Card}" CornerRadius="8,8,0,0" Padding="8,4" Margin="0,8,0,0">
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="110"/>
+                            <ColumnDefinition Width="60"/>
+                            <ColumnDefinition Width="106"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <TextBlock Text="어르신" FontSize="12" Foreground="{StaticResource Muted}"/>
+                        <TextBlock Grid.Column="1" Text="군" FontSize="12" Foreground="{StaticResource Muted}"/>
+                        <TextBlock Grid.Column="2" Text="상태" FontSize="12" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                        <TextBlock Grid.Column="3" Text="메모" FontSize="12" Foreground="{StaticResource Muted}"/>
+                    </Grid>
+                </Border>
+                <Border Style="{StaticResource ListBorder}" CornerRadius="0,0,10,10">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="SList"/>
+                    </ScrollViewer>
+                </Border>
+            </DockPanel>
+
+            <!-- ======================== 서비스 상담지 입력 ======================== -->
+            <DockPanel x:Name="PageCounsel" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Style="{StaticResource Btn}" Content="s-care 열기" Margin="0,0,6,0" Click="SOpen_Click"/>
+                        <Button x:Name="CsStartBtn" Style="{StaticResource BtnPrimary}" Content="입력 시작" Click="CsStart_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="서비스 상담지 입력" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text="엑셀 상담지를 끌어다 놓고 [입력 시작]을 누르면 s-care 서비스 상담지에 넣고 저장해요."
+                                   FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+                <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,12">
+                    <StackPanel VerticalAlignment="Bottom">
+                        <TextBlock Text="상담자" FontSize="12" Foreground="{StaticResource Muted}"/>
+                        <TextBox x:Name="CsCounselor" Width="170"/>
+                    </StackPanel>
+                    <StackPanel Margin="18,0,0,0" VerticalAlignment="Bottom">
+                        <TextBlock Text="자동으로 넣는 값" FontSize="12" Foreground="{StaticResource Muted}"/>
+                        <StackPanel x:Name="CsChips" Orientation="Horizontal"/>
+                    </StackPanel>
+                </StackPanel>
+                <!-- 끌어다 놓는 자리 -->
+                <Border x:Name="CsZone" DockPanel.Dock="Top" Height="150" CornerRadius="16" Background="#F8FAFF" AllowDrop="True">
+                    <Grid>
+                        <Rectangle x:Name="CsZoneLine" RadiusX="16" RadiusY="16" Stroke="#93C5FD" StrokeThickness="2" StrokeDashArray="3 2"/>
+                        <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                            <Canvas Width="30" Height="36" HorizontalAlignment="Center">
+                                <Path x:Name="CsDoc" Data="M0,0 L22,0 L30,8 L30,36 L0,36 Z" Fill="White" Stroke="#93C5FD" StrokeThickness="2"/>
+                                <Path Data="M22,0 L22,8 L30,8" Stroke="#93C5FD" StrokeThickness="2"/>
+                                <Path Data="M15,29 L15,14 M10,19 L15,14 L20,19" Stroke="#2563EB" StrokeThickness="2"/>
+                            </Canvas>
+                            <TextBlock Text="상담지 엑셀이나 폴더를 여기로 끌어다 놓으세요" FontSize="14.5" FontWeight="Bold" HorizontalAlignment="Center" Margin="0,8,0,2"/>
+                            <TextBlock Text="폴더를 놓으면 안의 상담지를 모두 읽어요 · 같은 어르신은 새 파일로 바꿔요" FontSize="12" Foreground="{StaticResource Muted}" HorizontalAlignment="Center"/>
+                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,8,0,0">
+                                <Button Style="{StaticResource BtnSmall}" Content="파일 고르기" Click="CsPickFiles_Click"/>
+                                <Button Style="{StaticResource BtnSmall}" Content="폴더 고르기" Margin="6,0,0,0" Click="CsPickFolder_Click"/>
+                                <Button Style="{StaticResource BtnSmall}" Content="빈 양식 받기" Margin="6,0,0,0" Click="CsTemplate_Click"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+                <DockPanel DockPanel.Dock="Top" Margin="0,14,0,6">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource Link}" Content="목록 비우기" VerticalAlignment="Center" Click="CsClear_Click"/>
+                    <TextBlock x:Name="CsCount" Text="상담지" FontSize="16" FontWeight="Bold"/>
+                    <TextBlock x:Name="CsMsg" FontSize="12" Foreground="{StaticResource Muted}" Margin="10,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                </DockPanel>
+                <RichTextBox x:Name="CsLog" DockPanel.Dock="Bottom" Style="{StaticResource LogBox}" Height="72" Margin="0,8,0,0"/>
+                <Border DockPanel.Dock="Top" Background="{StaticResource Card}" CornerRadius="8,8,0,0" Padding="8,5">
+                    <Grid x:Name="CsHdr"/>
+                </Border>
+                <Border Style="{StaticResource ListBorder}" CornerRadius="0,0,10,10">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="CsList"/>
+                    </ScrollViewer>
+                </Border>
+            </DockPanel>
+
+            <!-- ======================== 설정 ======================== -->
+            <StackPanel x:Name="PageSettings" Visibility="Collapsed">
+                <TextBlock Text="설정" FontSize="22" FontWeight="Bold"/>
+                <TextBlock Text="이 PC의 윈도우 계정에만 암호화해서 저장돼요." FontSize="13" Foreground="{StaticResource Muted}" Margin="0,0,0,10"/>
+                <TextBlock Text="goodeos 아이디" FontSize="12" Foreground="{StaticResource Muted}"/>
+                <TextBox x:Name="StId" Width="380" HorizontalAlignment="Left" FontSize="14" Margin="0,2,0,12"/>
+                <TextBlock Text="goodeos 비밀번호" FontSize="12" Foreground="{StaticResource Muted}"/>
+                <PasswordBox x:Name="StPw" Width="380" HorizontalAlignment="Left" Margin="0,2,0,12"/>
+                <TextBlock Text="Jev API 키 (카톡 요청 처리용)" FontSize="12" Foreground="{StaticResource Muted}"/>
+                <PasswordBox x:Name="StJev" Width="380" HorizontalAlignment="Left" Margin="0,2,0,12"/>
+                <TextBlock x:Name="StHint" FontSize="11" Foreground="{StaticResource Muted}"/>
+                <CheckBox x:Name="StHide" Content="점검할 때 크롬 창 숨기기 (백그라운드에서 실행)" Margin="0,4,0,0"/>
+                <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                    <Button Style="{StaticResource BtnPrimary}" Content="저장" Click="StSave_Click"/>
+                    <Button Style="{StaticResource Btn}" Content="크롬 창 열기" Margin="8,0,0,0" Click="StChrome_Click"/>
+                    <Button Style="{StaticResource Btn}" Content="로그인 정보 지우기" Margin="8,0,0,0" Click="StDelete_Click"/>
+                </StackPanel>
+                <TextBlock x:Name="StMsg" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,10,0,0" TextWrapping="Wrap"/>
+            </StackPanel>
+
+            <!-- 잠깐 뜨는 알림 -->
+            <Border x:Name="Toast" Background="#0F172A" CornerRadius="10" Padding="14,8" HorizontalAlignment="Center" VerticalAlignment="Bottom"
+                    Margin="0,0,0,24" Visibility="Collapsed" IsHitTestVisible="False">
+                <TextBlock x:Name="ToastText" Foreground="White" FontSize="13"/>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

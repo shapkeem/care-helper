@@ -1,0 +1,48 @@
+name: build-cs
+
+# C#판 맞춤돌봄도우미. 손으로 실행할 때만 돈다. release=true 일 때만 GitHub 릴리스를 만든다 (기본은 빌드 결과만 올림).
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: "GitHub 릴리스 만들기 (직원 PC 업데이트 버튼에 뜸)"
+        type: boolean
+        default: false
+      prerelease:
+        description: "시험판으로 올리기 (직원 PC 업데이트 버튼에 안 뜸)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+      - name: 시험
+        run: dotnet test csharp/CareHelper.Tests -c Release
+      - name: 빌드 (폴더째, .NET 포함)
+        shell: pwsh
+        run: |
+          $ver = (Select-String -Path "csharp/CareHelper.Core/AppInfo.cs" -Pattern 'AppVersion = "(.+)"').Matches[0].Groups[1].Value
+          echo "VER=$ver" >> $env:GITHUB_ENV
+          dotnet publish csharp/CareHelper.App -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o out/맞춤돌봄도우미
+          Compress-Archive -Path out/맞춤돌봄도우미 -DestinationPath "CareHelper-$ver-win-x64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: CareHelper-${{ env.VER }}-win-x64
+          path: CareHelper-${{ env.VER }}-win-x64.zip
+      - name: 릴리스
+        if: ${{ inputs.release }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: pwsh
+        run: |
+          $pre = @()
+          if ("${{ inputs.prerelease }}" -eq "true") { $pre = @("--prerelease") }
+          gh release create "v$env:VER" "CareHelper-$env:VER-win-x64.zip" --title "v$env:VER (C#판)" --notes "C#판 맞춤돌봄도우미. zip을 풀고 폴더 안의 맞춤돌봄도우미.exe를 실행하세요. 폴더째 옮겨야 합니다." --target "$env:GITHUB_SHA" @pre
