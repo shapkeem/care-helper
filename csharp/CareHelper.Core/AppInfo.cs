@@ -4,7 +4,7 @@ namespace CareHelper;
 public static class AppInfo
 {
     public const string AppName = "맞춤돌봄도우미";
-    public const string AppVersion = "3.6.2";
+    public const string AppVersion = "3.6.3";
     public const string UpdateRepo = "shapkeem/care-helper";
     public static readonly string UpdateApiUrl = $"https://api.github.com/repos/{UpdateRepo}/releases/latest";
 

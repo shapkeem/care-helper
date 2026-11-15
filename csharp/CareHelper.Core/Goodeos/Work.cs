@@ -553,11 +553,14 @@ public static class Work
 
     public sealed record PreviewRow(bool Ok, string Date, string Time, string Person, string Worker, string Svc, string Why);
 
-    /// <summary>업로드 전에 지울 날: 엑셀 안 날짜의 처음~끝 기간의 모든 날을, 등록할 줄이 있는 지원사마다.</summary>
+    /// <summary>업로드 전에 지울 날 (등록할 줄이 있는 지원사마다):
+    /// ① 이번 계획 기간 = 줄이 가장 많이 몰린 7일 안의 처음~끝 날 (새 계획서에서 빠진 날의 예전 일정도 지우려고 기간 전체를 본다)
+    /// ② 그 지원사의 줄 중 기간 밖 날짜는 그날만.
+    /// (예전에는 엑셀 전체의 처음~끝을 모든 지원사에 적용해서, 한 파일에 10월 날짜가 섞이면 모든 지원사의 10월 일정까지 지웠다)</summary>
     public static SortedDictionary<string, List<DateOnly>> UploadClearDays(IEnumerable<PreviewRow> rows)
     {
         var list = rows.ToList();
-        var dates = new List<DateOnly>();
+        var dated = new List<(PreviewRow Row, DateOnly Date)>();
         foreach (var r in list)
         {
             var d = PreviewDate(r.Date);
@@ -567,14 +570,32 @@ public static class Work
                     throw new WorkError($"미리보기 날짜 '{r.Date}'를 읽지 못했어요. 등록하지 않고 멈췄어요.");
                 continue;
             }
-            dates.Add(d.Value);
+            dated.Add((r, d.Value));
         }
         var result = new SortedDictionary<string, List<DateOnly>>(StringComparer.Ordinal);
-        if (dates.Count == 0) return result;
-        DateOnly first = dates.Min(), last = dates.Max();
-        var span = Enumerable.Range(0, last.DayNumber - first.DayNumber + 1).Select(i => first.AddDays(i)).ToList();
+        if (dated.Count == 0) return result;
+        // ① 줄이 가장 많은 7일 창 (같으면 이른 쪽)
+        var distinct = dated.Select(x => x.Date).Distinct().OrderBy(x => x).ToList();
+        DateOnly bestStart = distinct[0];
+        int best = -1;
+        foreach (var s in distinct)
+        {
+            int n = dated.Count(x => x.Date >= s && x.Date.DayNumber - s.DayNumber <= 6);
+            if (n > best)
+            {
+                best = n;
+                bestStart = s;
+            }
+        }
+        var inWin = distinct.Where(x => x >= bestStart && x.DayNumber - bestStart.DayNumber <= 6).ToList();
+        DateOnly first = inWin.Min(), last = inWin.Max();
+        var core = Enumerable.Range(0, last.DayNumber - first.DayNumber + 1).Select(i => first.AddDays(i)).ToList();
+        // ② 지원사마다: 기간 + 자기 줄 중 기간 밖 날짜
         foreach (var w in list.Where(r => r.Ok).Select(r => r.Worker).Distinct())
-            result[w] = span.ToList();
+        {
+            var own = dated.Where(x => x.Row.Ok && x.Row.Worker == w && (x.Date < first || x.Date > last)).Select(x => x.Date);
+            result[w] = core.Concat(own).Distinct().OrderBy(x => x).ToList();
+        }
         return result;
     }
 

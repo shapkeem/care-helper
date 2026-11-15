@@ -118,6 +118,24 @@ public class JobTests
         Assert.All(days.Values, v => Assert.Equal(span, v));
     }
 
+    /// <summary>한 파일에 동떨어진 날짜(10/28)가 섞여도 다른 지원사의 10월 일정까지 지우면 안 된다.
+    /// 그 지원사만 그날 하루를 더 지우고, 나머지는 이번 계획 기간(11/16~11/20)만.</summary>
+    [Fact]
+    public void OutlierDateDoesNotWidenOtherWorkers()
+    {
+        var rows = new List<Work.PreviewRow>();
+        foreach (var w in new[] { "김명란", "강지경", "박미해" })
+            for (int d = 16; d <= 20; d++)
+                rows.Add(new Work.PreviewRow(true, $"202611{d}", "", "", w, "", ""));
+        rows.Add(new Work.PreviewRow(true, "20261028", "", "", "강지경", "", ""));
+        rows.Add(new Work.PreviewRow(false, "20261020", "", "", "박미해", "", "")); // 오류 줄은 아무 날도 넓히지 않음
+        var days = Work.UploadClearDays(rows);
+        var week = Enumerable.Range(16, 5).Select(d => new DateOnly(2026, 11, d)).ToList();
+        Assert.Equal(week, days["김명란"]);
+        Assert.Equal(week, days["박미해"]);
+        Assert.Equal(new[] { new DateOnly(2026, 10, 28) }.Concat(week), days["강지경"]);
+    }
+
     [Fact]
     public void PlanMonthUsesSundayOfWeek()
     {
