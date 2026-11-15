@@ -138,7 +138,11 @@ public static class Scanner
                 var t = NormalizeTime(v);
                 if (t == null)
                 {
-                    job.Warnings.Add($"{rlabel}행 {colname} '{DisplayValue(v)}' 해석 불가");
+                    // 계획 시간을 못 읽으면 goodeos가 엑셀을 받지 않는다(업로드가 멈춤) → 오류로 막는다 (종료시간은 고치기 칸이 있다)
+                    if (col == ColStart || col == ColEnd)
+                        job.Error(i, col, $"{rlabel}행 {person} {colname} '{DisplayValue(v)}'을(를) 시간으로 읽을 수 없음");
+                    else
+                        job.Warnings.Add($"{rlabel}행 {colname} '{DisplayValue(v)}' 해석 불가");
                     continue;
                 }
                 if (v is string vs && vs == t) continue;

@@ -627,9 +627,51 @@ public static class Work
         await page.WaitForSelectorAsync("#DIV_LAYER #file_name", new() { Timeout = 30000 });
         await page.SetInputFilesAsync("#DIV_LAYER #file_name", path);
         log("엑셀을 올리는 중... (줄이 많으면 오래 걸려요)");
+        int upMark = dlg.Mark();
+        // goodeos에 보낸 요청 중 아직 답이 안 온 것 (엑셀을 읽는 중인지 보려고)
+        int pending = 0;
+        var idleSince = DateTime.Now;
+        void OnReq(object? _, IRequest r) { Interlocked.Increment(ref pending); }
+        void OnDone(object? _, IRequest r) { if (Interlocked.Decrement(ref pending) <= 0) idleSince = DateTime.Now; }
+        page.Request += OnReq;
+        page.RequestFinished += OnDone;
+        page.RequestFailed += OnDone;
+        try
+        {
         await page.EvaluateAsync("() => fileUpload()");
-        await page.WaitForFunctionAsync("() => document.querySelectorAll('#DIV_LAYER #TBL_LIST tbody tr').length > 0", null,
-                                        new() { Timeout = 600000 });
+        // 미리보기 표가 뜰 때까지 기다린다. goodeos가 알림창으로 거절하면(형식 오류 등) 표가 안 뜨므로,
+        // 알림창이 떴고 보낸 요청이 다 끝났는데도 5초 넘게 표가 없으면 10분을 기다리지 않고 바로 알린다.
+        var upEnd = DateTime.Now.AddSeconds(600);
+        var nextNote = DateTime.Now.AddSeconds(30);
+        bool told = false;
+        while (true)
+        {
+            if (await page.EvaluateAsync<int>("() => document.querySelectorAll('#DIV_LAYER #TBL_LIST tbody tr').length") > 0) break;
+            var said = dlg.Since(upMark);
+            if (said.Count > 0 && !told)
+            {
+                log("  goodeos 알림: " + string.Join(" / ", said));
+                told = true;
+            }
+            if (said.Count > 0 && Volatile.Read(ref pending) <= 0 && (DateTime.Now - idleSince).TotalSeconds > 5)
+                throw new WorkError("goodeos가 엑셀을 받지 않았어요: " + string.Join(" / ", said) +
+                                    " — 엑셀의 시간·날짜 칸을 확인해 주세요. 일정은 지우지 않았어요.");
+            if (DateTime.Now > upEnd)
+                throw new WorkError("goodeos가 10분 동안 미리보기를 보여 주지 않았어요. 일정은 지우지 않았어요. 잠시 뒤 다시 올려 주세요.");
+            if (DateTime.Now > nextNote)
+            {
+                log("  아직 goodeos가 엑셀을 읽는 중이에요...");
+                nextNote = DateTime.Now.AddSeconds(30);
+            }
+            await page.WaitForTimeoutAsync(500);
+        }
+        }
+        finally
+        {
+            page.Request -= OnReq;
+            page.RequestFinished -= OnDone;
+            page.RequestFailed -= OnDone;
+        }
         await SettleAsync(page, 500, 60);
         var arr = await page.EvaluateAsync<JsonElement>(@"() => [...document.querySelectorAll('#DIV_LAYER #TBL_LIST tbody tr')].map(tr => {
         const c = [...tr.cells].map(x => x.innerText.trim());
