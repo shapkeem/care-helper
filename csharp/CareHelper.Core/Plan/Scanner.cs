@@ -87,7 +87,7 @@ public static class Scanner
     }
 
     public static void ScanFile(FileJob job, Sheet ws, Dictionary<string, List<Beneficiary>>? beneficiaries, Action<string> log,
-                                Dictionary<string, WorkerInfo>? workerData = null, int? currentYear = null)
+                                Dictionary<string, WorkerInfo>? workerData = null, int? currentYear = null, DateOnly? today = null)
     {
         var label = job.FileName;
         (job.Grid, job.RowNums) = ExtractDataGrid(ws, log);
@@ -221,7 +221,9 @@ public static class Scanner
         if (silentCount > 0)
             job.AutoFixes.Add($"표시가 같은 저장 형식 통일 {silentCount}건 자동 적용");
 
-        CheckDates(job, label, currentYear ?? DateTime.Today.Year);
+        // 연말·연초에는 다음/지난 해 날짜도 맞는 날짜다 (12월에 1월 계획서, 1월에 12월 계획서)
+        var refDay = today ?? DateOnly.FromDateTime(DateTime.Today);
+        CheckDates(job, label, currentYear ?? refDay.Year, currentYear != null && today == null ? 6 : refDay.Month);
         CheckOverlaps(job, label);
     }
 
@@ -246,8 +248,13 @@ public static class Scanner
         return sb.ToString();
     }
 
-    static void CheckDates(FileJob job, string label, int currentYear)
+    /// <summary>refMonth: 오늘의 달. 12월이면 다음 해 1·2월 날짜를, 1월이면 지난 해 11·12월 날짜를 맞는 연도로 본다.</summary>
+    static void CheckDates(FileJob job, string label, int currentYear, int refMonth = 6)
     {
+        bool YearOk(long year, long month) =>
+            year == currentYear || (refMonth == 12 && year == currentYear + 1 && month <= 2) || (refMonth == 1 && year == currentYear - 1 && month >= 11);
+        int TargetYear(long month) =>
+            refMonth == 12 && month <= 2 ? currentYear + 1 : refMonth == 1 && month >= 11 ? currentYear - 1 : currentYear;
         var grid = job.Grid;
         var rowNums = job.RowNums;
         var parsed = new Dictionary<int, (long N, DateOnly? Dt)>();
@@ -262,9 +269,10 @@ public static class Scanner
         foreach (var (i, (n, _)) in parsed.ToList())
         {
             long year = n / 10000;
-            if (year == currentYear) continue;
             long mm = n / 100 % 100, dd = n % 100;
-            long fixedN = currentYear * 10000L + mm * 100 + dd;
+            if (YearOk(year, mm)) continue;
+            int target = TargetYear(mm);
+            long fixedN = target * 10000L + mm * 100 + dd;
             var fixedDt = ToDate(fixedN);
             int rlabel = rowNums[i];
             var person = NormStr(grid[i][ColName]);
@@ -277,7 +285,7 @@ public static class Scanner
                 {
                     fixedN = alt;
                     fixedDt = altDt;
-                    why = $"연도가 올해({currentYear}년)가 아니고, 올해는 {mm}월 {dd}일이 없어 {mm}월 {dd - 1}일로 자동 보정 ({year}년→{currentYear}년)";
+                    why = $"연도가 올해({target}년)가 아니고, 올해는 {mm}월 {dd}일이 없어 {mm}월 {dd - 1}일로 자동 보정 ({year}년→{target}년)";
                 }
                 else
                 {
@@ -286,20 +294,20 @@ public static class Scanner
                 }
             }
             else
-                why = $"연도가 올해({currentYear}년)가 아니어서 자동 보정 ({year}년→{currentYear}년)";
+                why = $"연도가 올해({target}년)가 아니어서 자동 보정 ({year}년→{target}년)";
             job.Proposals.Add(new FixProposal("날짜", label, rlabel, person, n.ToString(), fixedN.ToString(), why,
                 new() { (i, ColDate) }, DateBuilder, auto: true));
             parsed[i] = (fixedN, fixedDt);
         }
 
-        var majorDates = parsed.Values.Where(x => x.Dt != null && x.N / 10000 == currentYear).Select(x => x.Dt!.Value)
+        var majorDates = parsed.Values.Where(x => x.Dt != null && YearOk(x.N / 10000, x.N / 100 % 100)).Select(x => x.Dt!.Value)
             .OrderBy(x => x).ToList();
         int margin = 7;
         DateOnly? med = majorDates.Count > 0 ? majorDates[majorDates.Count / 2] : null;
 
         foreach (var (i, (n, dt)) in parsed)
         {
-            if (n / 10000 != currentYear) continue;
+            if (!YearOk(n / 10000, n / 100 % 100)) continue;
             int rlabel = rowNums[i];
             var person = NormStr(grid[i][ColName]);
             if (dt == null)
@@ -315,10 +323,11 @@ public static class Scanner
             string why = "";
             if (med != null && dd <= 12)
             {
-                var cand = ToDate(currentYear * 10000L + dd * 100 + mm);
+                long cy = n / 10000;
+                var cand = ToDate(cy * 10000L + dd * 100 + mm);
                 if (cand != null && Math.Abs(cand.Value.DayNumber - med.Value.DayNumber) <= margin)
                 {
-                    fixedN = currentYear * 10000L + dd * 100 + mm;
+                    fixedN = cy * 10000L + dd * 100 + mm;
                     why = "월/일이 뒤바뀐 것으로 추정";
                 }
             }
@@ -326,7 +335,9 @@ public static class Scanner
                 job.Proposals.Add(new FixProposal("날짜", label, rlabel, person, n.ToString(), fixedN.ToString()!, why,
                     new() { (i, ColDate) }, DateBuilder));
             else
-                job.Warnings.Add($"{rlabel}행 서비스일자 {n}가 파일의 다른 날짜들과 동떨어져 있음");
+                // 경고만 하면 통합본에 그대로 들어가 엉뚱한 날(지난달 등)에 일정이 올라간다 → 오류로 막고, 맞는 날짜를 넣게 한다
+                // (정말 맞는 날짜면 같은 날짜를 그대로 넣고 [수정하기])
+                job.Error(i, ColDate, $"{rlabel}행 {person} 서비스일자 {n}가 파일의 다른 날짜들({med:MM'/'dd} 무렵)과 동떨어져 있음 — 맞는 날짜를 넣어 주세요");
         }
     }
 

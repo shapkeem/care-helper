@@ -184,6 +184,44 @@ public class PlanTests
         Assert.Equal(new[] { 1 }, job.DroppedRows.Keys); // 못 고친 줄은 합치면서 지움
     }
 
+    static FileJob ScanRows(DateOnly today, params long[] dates)
+    {
+        var ws = new Sheet();
+        int c = 1;
+        foreach (var h in StandardHeaders) ws.Set(1, c++, h);
+        for (int r = 0; r < dates.Length; r++)
+        {
+            var vals = Row(dates[r]);
+            for (int k = 0; k < vals.Length; k++)
+                if (vals[k] != null) ws.Set(r + 2, k + 1, vals[k]);
+        }
+        var job = new FileJob("x.xlsx");
+        Scanner.ScanFile(job, ws, null, _ => { }, null, null, today);
+        return job;
+    }
+
+    /// <summary>12월에 쓴 1월 계획서: 2027년 날짜를 2026년으로 '보정'하면 안 된다.</summary>
+    [Fact]
+    public void DecemberPlanForJanuaryKeepsNextYear()
+    {
+        var job = ScanRows(new DateOnly(2026, 12, 24), 20261228, 20261230, 20270102, 20270104);
+        Assert.Empty(job.Proposals.Where(p => p.Kind == "날짜"));
+        Assert.Empty(job.Errors);
+        Assert.DoesNotContain(job.Warnings, w => w.Contains("동떨어져"));
+        // 연도를 잘못 쓴 줄(2025)은 여전히 고친다: 1월 날짜면 다음 해로
+        var job2 = ScanRows(new DateOnly(2026, 12, 24), 20261228, 20250102);
+        Assert.Contains(job2.Proposals, p => p.Kind == "날짜" && p.SuggestedDisp == "20270102");
+    }
+
+    /// <summary>파일 안에서 날짜가 동떨어진 줄은 경고가 아니라 오류(서비스일자 고치기)로 막는다.</summary>
+    [Fact]
+    public void FarAwayDateIsAnError()
+    {
+        var job = ScanRows(new DateOnly(2026, 11, 15), 20261116, 20261117, 20261118, 20261028);
+        Assert.Contains(job.Errors, e => e.StartsWith("5행") && e.Contains("동떨어져"));
+        Assert.Equal(ColDate, job.ErrorCells[job.Errors.Single(e => e.Contains("동떨어져"))].Col);
+    }
+
     [Fact]
     public void BlankBirthAndGenderCellsDoNotEndTheData()
     {
