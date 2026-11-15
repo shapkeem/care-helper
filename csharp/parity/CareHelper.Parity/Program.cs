@@ -21,6 +21,18 @@ if (args[0] == "--live-daily") // 실제 goodeos 조회만 (숫자만 출력)
     await GoodeosChrome.CloseAsync();
     return;
 }
+if (args[0] == "--fetch-lists") // '명단 새로 받기'와 같은 동작 (오늘 명단이 있어도 다시 받기). 개인정보는 출력하지 않는다
+{
+    var (r0, _) = Lists.LatestFile("대상자리스트", ".xls");
+    var before = r0 != null ? File.GetLastWriteTime(r0) : (DateTime?)null;
+    var day = await Lists.FetchDailyListsAsync(m => Console.WriteLine("log: " + System.Text.RegularExpressions.Regex.Replace(m, "[가-힣]{2,4}(?=:)", "*")), force: true);
+    var (r1, d1) = Lists.LatestFile("대상자리스트", ".xls");
+    var (w1, wd1) = Lists.LatestFile("생활지원사명단", ".json");
+    Console.WriteLine($"day={day} roster={Path.GetFileName(r1)} rosterDay={d1} before={before:HH:mm:ss} after={File.GetLastWriteTime(r1!):HH:mm:ss} rows={DailyCheck.ReadList(r1!).Count}");
+    Console.WriteLine($"workers={Path.GetFileName(w1)} day={wd1} n={Lists.ParseWorkers(File.ReadAllText(w1!)).Count}");
+    await GoodeosChrome.CloseAsync();
+    return;
+}
 if (args[0] == "--mock-scare") // 가짜 제공계획 화면(mock.html)에 C#판 FillJs 를 돌려 결과를 남긴다: <폴더> <크롬 경로>
 {
     var fillJs = (string)typeof(ScarePlan).GetField("FillJs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetRawConstantValue()!;

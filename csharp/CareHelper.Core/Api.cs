@@ -40,7 +40,7 @@ public sealed class Api
 
     readonly Action<string, object?> _emit;
     // 기능마다 따로: 카톡 처리 중에도 일일실적 점검 등 다른 기능은 동시에 할 수 있다
-    public readonly Dictionary<string, BusyFlag> B = new[] { "daily", "kakao", "conv", "scare", "chrome", "update" }
+    public readonly Dictionary<string, BusyFlag> B = new[] { "daily", "kakao", "conv", "scare", "chrome", "update", "lists" }
         .ToDictionary(k => k, _ => new BusyFlag());
     DailyResult? _check;
     readonly HashSet<int> _filled = new(); // 실적을 넣은 사람 번호 (모두 넣기에서 다시 넣지 않게)
@@ -260,6 +260,7 @@ public sealed class Api
     public string? ConvStart()
     {
         if (B["conv"].V) return "변환이나 업로드가 이미 진행 중이에요.";
+        if (B["lists"].V) return "명단을 받는 중이에요. 끝난 뒤에 눌러 주세요.";
         B["conv"].V = true;
         _convDel = (new(), new());
         Thread(async () =>
@@ -290,6 +291,42 @@ public sealed class Api
             finally
             {
                 B["conv"].V = false;
+                GoodeosChrome.ScheduleClose();
+            }
+        });
+        return null;
+    }
+
+    /// <summary>제공계획서 변환이 수정 제안·오류 파일 답을 기다리는 중인가 (그동안은 명단을 새로 받아도 된다)</summary>
+    bool ConvWaitingUser => (_reviewTcs != null && !_reviewTcs.Task.IsCompleted) || (_errTcs != null && !_errTcs.Task.IsCompleted);
+
+    /// <summary>'명단 새로 받기': 오늘 받은 명단이 있어도 goodeos 에서 대상자리스트·생활지원사 명단을 다시 받는다.
+    /// 끝나면 conv_lists_done(오류 글 또는 null).</summary>
+    public string? ConvRefreshLists()
+    {
+        if (B["lists"].V) return "명단을 받는 중이에요.";
+        if (B["conv"].V && !ConvWaitingUser) return "변환이나 업로드가 진행 중이에요. 끝난 뒤에 눌러 주세요.";
+        bool midReview = B["conv"].V;
+        B["lists"].V = true;
+        Thread(async () =>
+        {
+            void Log(string m) => _emit("conv_log", m);
+            try
+            {
+                Log("명단 새로 받는 중...");
+                await Lists.FetchDailyListsAsync(Log, force: true);
+                _emit("conv_lists_done", new MsgEv(true, midReview
+                    ? "새 명단을 받았어요. 지금 보이는 오류는 받기 전 명단 기준이에요. 이번 변환을 끝낸 뒤 '변환 시작'을 다시 누르면 새 명단으로 확인해요."
+                    : "새 명단을 받았어요. '변환 시작'을 누르면 새 명단으로 확인해요."));
+            }
+            catch (Exception e)
+            {
+                Log($"[오류] 명단을 받지 못했어요: {e.Message}");
+                _emit("conv_lists_done", new MsgEv(false, $"명단을 받지 못했어요: {e.Message}"));
+            }
+            finally
+            {
+                B["lists"].V = false;
                 GoodeosChrome.ScheduleClose();
             }
         });

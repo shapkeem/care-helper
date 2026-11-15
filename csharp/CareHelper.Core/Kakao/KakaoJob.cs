@@ -39,10 +39,11 @@ public static class Lists
     static DateOnly? _rosterDay;
 
     /// <summary>대상자 명단(이용상태 '전체')은 하루에 한 번만 받는다.</summary>
-    public static async Task<List<Dictionary<string, string>>> LoadRosterAsync(IPage page, DateOnly today, Action<string> log)
+    /// <param name="force">true 면 오늘 받은 명단이 있어도 새로 받는다 (제공계획서 변환의 '명단 새로 받기')</param>
+    public static async Task<List<Dictionary<string, string>>> LoadRosterAsync(IPage page, DateOnly today, Action<string> log, bool force = false)
     {
         lock (RosterGate)
-            if (_rosterRows != null && _rosterDay == today)
+            if (!force && _rosterRows != null && _rosterDay == today)
                 return _rosterRows;
         if (!Directory.Exists(@"C:\"))
             throw new WorkError("이 PC에 C 드라이브가 없어서 대상자 명단을 저장할 수 없어요.");
@@ -56,7 +57,7 @@ public static class Lists
         }
         var name = $"대상자리스트{today:yyyy.MM.dd}.xls";
         var path = Path.Combine(AppInfo.RosterDir, name);
-        if (!File.Exists(path))
+        if (force || !File.Exists(path))
         {
             log("오늘 대상자 명단(전체) 받는 중...");
             var tmp = path + ".part";
@@ -107,10 +108,10 @@ public static class Lists
     }
 
     /// <summary>생활지원사 명단(이름·생년월일·동)도 하루 한 번 goodeos 에서 받아 대상자리스트 옆에 둔다.</summary>
-    public static async Task<Dictionary<string, WorkerInfo>> LoadWorkersAsync(IPage page, DateOnly today, Action<string> log)
+    public static async Task<Dictionary<string, WorkerInfo>> LoadWorkersAsync(IPage page, DateOnly today, Action<string> log, bool force = false)
     {
         var path = WorkersPath(today);
-        if (File.Exists(path))
+        if (!force && File.Exists(path))
         {
             var cached = ParseWorkers(await File.ReadAllTextAsync(path));
             if (cached.Values.All(v => v.Gender != null)) // 성별 없이 받은 예전 명단이면 새로 받는다
@@ -208,7 +209,7 @@ public static class Lists
     }
 
     /// <summary>goodeos 에 로그인해서 오늘 대상자리스트와 생활지원사 명단을 받는다. → 서버 날짜</summary>
-    public static async Task<DateOnly> FetchDailyListsAsync(Action<string> log)
+    public static async Task<DateOnly> FetchDailyListsAsync(Action<string> log, bool force = false)
     {
         try
         {
@@ -216,10 +217,10 @@ public static class Lists
             var page = await GoodeosChrome.GetPageAsync(pw);
             var today = DateOnly.FromDateTime(DateTime.Now + await Work.ServerOffsetAsync(page));
             // 대상자 명단은 새 탭에서, 지원사 명단은 지금 탭에서 동시에 받는다
-            var fRoster = Task.Run(() => GoodeosChrome.InNewTabAsync(tab => LoadRosterAsync(tab, today, log)));
+            var fRoster = Task.Run(() => GoodeosChrome.InNewTabAsync(tab => LoadRosterAsync(tab, today, log, force)));
             try
             {
-                await LoadWorkersAsync(page, today, log);
+                await LoadWorkersAsync(page, today, log, force);
             }
             finally
             {

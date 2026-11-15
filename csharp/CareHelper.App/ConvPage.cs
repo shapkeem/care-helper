@@ -63,6 +63,31 @@ public partial class MainWindow
     }
 
     void COpenSrc_Click(object sender, RoutedEventArgs e) => _api.ConvOpen("src");
+
+    /// <summary>명단 새로 받기: 오늘 받은 명단이 있어도 맞광에서 다시 받는다 (대상자가 오늘 새로 등록됐을 때)</summary>
+    void CLists_Click(object sender, RoutedEventArgs e)
+    {
+        var err = _api.ConvRefreshLists();
+        if (err != null)
+        {
+            Toaster(err);
+            return;
+        }
+        CLists.IsEnabled = false;
+        CLists.Content = "받는 중...";
+        _cMetric["roster"].Text = "받는 중";
+        _cMetric["workers"].Text = "받는 중";
+    }
+
+    void ConvListsDone(MsgEv m)
+    {
+        CLists.IsEnabled = true;
+        CLists.Content = "명단 새로 받기";
+        if (m.Ok) CWarnBox.Visibility = Visibility.Collapsed; // '오늘 명단을 받지 못해서…' 경고는 이제 맞지 않다
+        CLogLine(m.Msg);
+        Toaster(m.Msg);
+        ConvRefresh();
+    }
     void COpenDst_Click(object sender, RoutedEventArgs e) => _api.ConvOpen("dst");
 
     void CClearLeft_Click(object sender, RoutedEventArgs e)

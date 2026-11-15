@@ -9,7 +9,7 @@
     <AssemblyName>맞춤돌봄도우미</AssemblyName>
     <RootNamespace>CareHelper.App</RootNamespace>
     <ApplicationIcon>icon.ico</ApplicationIcon>
-    <Version>3.6.1</Version>
+    <Version>3.6.2</Version>
     <Product>CareHelper</Product>
     <Company>CareHelper</Company>
     <Description>CareHelper</Description>

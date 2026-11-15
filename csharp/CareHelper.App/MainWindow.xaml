@@ -103,6 +103,8 @@
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
                         <Button Style="{StaticResource Btn}" Content="작업전 폴더" Margin="0,0,6,0" Click="COpenSrc_Click"/>
                         <Button Style="{StaticResource Btn}" Content="결과 폴더" Margin="0,0,6,0" Click="COpenDst_Click"/>
+                        <Button x:Name="CLists" Style="{StaticResource Btn}" Content="명단 새로 받기" Margin="0,0,6,0" Click="CLists_Click"
+                                ToolTip="오늘 이미 받은 명단이 있어도 맞광에서 대상자리스트와 생활지원사 명단을 지금 다시 받아요"/>
                         <Button x:Name="CStart" Style="{StaticResource BtnPrimary}" Content="변환 시작" Margin="0,0,6,0" Click="CStart_Click"/>
                         <Button x:Name="CUpload" Style="{StaticResource Btn}" Content="업로드" Click="CUpload_Click"/>
                     </StackPanel>

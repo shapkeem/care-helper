@@ -436,6 +436,9 @@ public partial class MainWindow : Window
             case "conv_done":
                 ConvDone((ConvDoneEv)d!);
                 break;
+            case "conv_lists_done":
+                ConvListsDone((MsgEv)d!);
+                break;
             case "conv_upload_done":
                 ConvUploadDone((UploadDoneEv)d!);
                 break;
