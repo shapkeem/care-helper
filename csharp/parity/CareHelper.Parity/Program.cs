@@ -33,6 +33,44 @@ if (args[0] == "--fetch-lists") // '명단 새로 받기'와 같은 동작 (오�
     await GoodeosChrome.CloseAsync();
     return;
 }
+if (args[0] == "--fix-test") // 오류 파일 화면에서 칸마다 값을 넣고 '고른 대로 계속'을 누른 것처럼 돌려 결과를 본다: <local 폴더>
+{
+    var loc = args[1];
+    var dsk = Directory.CreateTempSubdirectory();
+    Converter.DesktopOverride = dsk.FullName;
+    var (s0, d0) = Converter.WorkFolders();
+    foreach (var f in Directory.GetFiles(Path.Combine(loc, "plan_src")))
+        File.Copy(f, Path.Combine(s0, Path.GetFileName(f)));
+    var wk = Lists.ParseWorkers(File.ReadAllText(Path.Combine(loc, "workers.json")));
+    var res2 = Converter.Run(m => { if (m.Contains("[수정") || m.Contains("[합침]") || m.Contains("저장 완료") || m.Contains("[오류]")) Console.WriteLine(m); },
+        Path.Combine(loc, "roster.xls"), wk, null, props => props.ToDictionary(p => p.Pid, p => p.SuggestedDisp),
+        (asks, check) =>
+        {
+            var ans = new Dictionary<int, ErrorAnswer>();
+            foreach (var a in asks)
+            {
+                var an = new ErrorAnswer { How = "separate" };
+                for (int e = 0; e < a.Errors.Count; e++)
+                {
+                    var it = a.Errors[e];
+                    if (it.Field == null) { Console.WriteLine($"  (고칠 칸 없음) {it.Text}"); continue; }
+                    // 고칠 값: 선택지가 있으면 첫 번째 맞는 것, 서비스일자는 20261118, 그 밖은 지금 값을 다듬은 것
+                    var cands = new List<string>();
+                    if (it.Choices != null) cands.AddRange(it.Choices.Take(30));
+                    if (it.Field.Contains("일자")) cands.Insert(0, "20261118");
+                    cands.Add(it.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "");
+                    var ok = cands.FirstOrDefault(c => c.Length > 0 && check(a.Id, e, c) == null);
+                    Console.WriteLine($"  {a.Worker} 오류 '{it.Text.Replace("\n", " ")}' → 넣을 값 '{ok}' (선택지 {it.Choices?.Count ?? 0}개)");
+                    if (ok != null) an.Fixes[e] = ok;
+                }
+                ans[a.Id] = an;
+            }
+            return ans;
+        });
+    Console.WriteLine($"ok={res2.Ok}/{res2.Total} failed={string.Join(", ", res2.Failed.Select(f => f.Name))}");
+    Console.WriteLine("out: " + string.Join(" | ", Directory.GetFiles(d0).Select(Path.GetFileName)));
+    return;
+}
 if (args[0] == "--mock-scare") // 가짜 제공계획 화면(mock.html)에 C#판 FillJs 를 돌려 결과를 남긴다: <폴더> <크롬 경로>
 {
     var fillJs = (string)typeof(ScarePlan).GetField("FillJs", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetRawConstantValue()!;

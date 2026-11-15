@@ -296,12 +296,80 @@ public partial class MainWindow
     readonly Dictionary<int, (Button? Merge, Button Sep)> _erBtns = new();
     readonly Dictionary<(int, int), FrameworkElement> _erFields = new();
 
+    readonly Dictionary<int, Button?> _erFixBtn = new();
+    readonly Dictionary<(int, int), TextBlock> _erHints = new();
+    readonly Dictionary<(int, int), TextBlock> _erMsgs = new();
+
+    /// <summary>[수정하기]: 이 파일의 칸에 넣은 값을 바로 확인한다. 맞는 값은 초록으로 '고침' 표시,
+    /// 틀린 값은 노란 칸. 오류를 다 고쳤으면 이 파일은 통합본에 들어간다고 표시한다 (실제 고치기는 '고른 대로 계속'에서).</summary>
+    void ErFix(int k)
+    {
+        var f = _erFiles.First(x => x.Id == k);
+        int fixedN = 0, empty = 0;
+        var bad = new List<string>();
+        for (int n = 0; n < f.Errors.Count; n++)
+        {
+            if (!_erFields.TryGetValue((k, n), out var cf)) continue;
+            var text = KVal(cf);
+            if (text.Length == 0)
+            {
+                KWarn(cf, false);
+                ErMark(k, n, null);
+                empty++;
+                continue;
+            }
+            var problem = _api.ConvCheckFix(k, n, text);
+            KWarn(cf, problem != null);
+            ErMark(k, n, problem == null ? text : null);
+            if (problem != null) bad.Add(problem);
+            else fixedN++;
+        }
+        int left = f.Errors.Count - fixedN;
+        if (bad.Count > 0)
+        {
+            Warn("노란 칸의 값을 확인해 주세요.\n\n" + string.Join("\n", bad.Take(8)));
+            return;
+        }
+        if (fixedN == 0)
+        {
+            Toaster("고칠 값을 칸에 넣은 뒤 [수정하기]를 눌러 주세요.");
+            return;
+        }
+        if (left == 0)
+        {
+            ErPick(k, "fix");
+            Toaster($"{f.Worker}: 오류 {fixedN}건을 다 고쳤어요. '고른 대로 계속'을 누르면 고친 값으로 통합본에 들어가요.");
+        }
+        else
+            Toaster($"{f.Worker}: {fixedN}건 고침, {left}건 남았어요. 남은 칸도 고치거나, '오류 줄 지우고 합치기'·'따로 빼기'를 골라 주세요.");
+    }
+
+    /// <summary>오류 줄 표시: 고친 값이 있으면 초록 '✓ 고침', 없으면 원래 빨간 글자.</summary>
+    void ErMark(int k, int n, string? fixedValue)
+    {
+        if (!_erMsgs.TryGetValue((k, n), out var msg)) return;
+        var orig = _erFiles.First(x => x.Id == k).Errors[n].Text;
+        if (fixedValue != null)
+        {
+            msg.Text = $"✓ 고침 → '{fixedValue}'   ({orig})";
+            msg.Foreground = B("#166534");
+        }
+        else
+        {
+            msg.Text = orig;
+            msg.Foreground = Res("Danger");
+        }
+    }
+
     void ErShow(List<ErrorAsk> files)
     {
         _erFiles = files;
         _erPick.Clear();
         _erBtns.Clear();
         _erFields.Clear();
+        _erFixBtn.Clear();
+        _erHints.Clear();
+        _erMsgs.Clear();
         ErList.Children.Clear();
         foreach (var f in files)
         {
@@ -310,6 +378,13 @@ public partial class MainWindow
             DockPanel.SetDock(btns, Dock.Right);
             Button? mer = null;
             var k = f.Id;
+            Button? fix = null;
+            if (f.Errors.Any(x => x.Field != null)) // 고칠 칸이 있는 파일: 넣은 값을 바로 확인하고 고친다
+            {
+                fix = new Button { Style = (Style)FindResource("BtnTiny"), Content = "수정하기", Margin = new Thickness(0, 0, 6, 0) };
+                fix.Click += (_, _) => ErFix(k);
+                btns.Children.Add(fix);
+            }
             if (f.CanMerge)
             {
                 mer = new Button { Style = (Style)FindResource("BtnTiny"), Content = "오류 줄 지우고 합치기", Margin = new Thickness(0, 0, 6, 0) };
@@ -326,6 +401,7 @@ public partial class MainWindow
             head.Children.Add(title);
             ErList.Children.Add(head);
             _erBtns[f.Id] = (mer, sep);
+            _erFixBtn[f.Id] = fix;
             for (int n = 0; n < f.Errors.Count; n++)
             {
                 var e = f.Errors[n];
@@ -347,8 +423,20 @@ public partial class MainWindow
                     DockPanel.SetDock(hint, Dock.Right);
                     line.Children.Add(hint);
                     _erFields[(f.Id, n)] = cf;
+                    _erHints[(f.Id, n)] = hint;
+                    // 고친 뒤 값을 또 바꾸면 '고침' 표시를 지우고, [수정하기]를 다시 누르게 한다
+                    int fid = f.Id, en = n;
+                    void Edited()
+                    {
+                        ErMark(fid, en, null);
+                        if (_erPick.TryGetValue(fid, out var how) && how == "fix") ErPick(fid, "separate");
+                    }
+                    if (cf is CellField cfc) cfc.Changed += Edited;
+                    else ((TextBox)cf).TextChanged += (_, _) => Edited();
                 }
-                line.Children.Add(Label(e.Text, 12, fg: Res("Danger"), wrap: true));
+                var msg = Label(e.Text, 12, fg: Res("Danger"), wrap: true);
+                _erMsgs[(f.Id, n)] = msg;
+                line.Children.Add(msg);
                 ErList.Children.Add(line);
             }
             ErPick(f.Id, "separate");
@@ -364,8 +452,11 @@ public partial class MainWindow
         _erPick[k] = how;
         if (mer != null) mer.Style = (Style)FindResource(how == "merge" ? "BtnTinyPrimary" : "BtnTiny");
         sep.Style = (Style)FindResource(how == "separate" ? "BtnTinyPrimary" : "BtnTiny");
+        if (_erFixBtn.TryGetValue(k, out var fb) && fb != null)
+            fb.Style = (Style)FindResource(how == "fix" ? "BtnTinyPrimary" : "BtnTiny");
+        int nf = _erPick.Values.Count(v => v == "fix");
         int n = _erPick.Values.Count(v => v == "merge");
-        ErCount.Text = $"합치기 {n}개 / 따로 빼기 {_erPick.Count - n}개";
+        ErCount.Text = (nf > 0 ? $"수정 {nf}개 / " : "") + $"합치기 {n}개 / 따로 빼기 {_erPick.Count - n - nf}개";
     }
 
     void ErMergeAll_Click(object sender, RoutedEventArgs e)
@@ -380,7 +471,8 @@ public partial class MainWindow
 
     void ErApply_Click(object sender, RoutedEventArgs e)
     {
-        var answer = _erPick.ToDictionary(kv => kv.Key, kv => new ErrorAnswer { How = kv.Value });
+        // '수정' 고른 파일은 고친 값으로 오류가 다 없어지면 통합본에 들어간다 (남으면 따로 빼기와 같음)
+        var answer = _erPick.ToDictionary(kv => kv.Key, kv => new ErrorAnswer { How = kv.Value == "fix" ? "separate" : kv.Value });
         var bad = new List<string>();
         foreach (var ((k, n), cf) in _erFields)
         {

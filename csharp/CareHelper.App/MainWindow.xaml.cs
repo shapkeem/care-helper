@@ -261,6 +261,14 @@ public partial class MainWindow : Window
         {
             t.Stop();
             var root = (FrameworkElement)Content;
+            if (args.Contains("--fixtest")) // 시험용: 오류 파일 칸에 값을 넣고 [수정하기]를 누른 화면
+            {
+                foreach (var ((k, n), cf) in _erFields)
+                    if (cf is CellField c) c.Text = "1A102";
+                    else ((System.Windows.Controls.TextBox)cf).Text = "홍길동";
+                ErFix(_erFiles[0].Id);
+                root.UpdateLayout();
+            }
             if (path.EndsWith(".png", StringComparison.OrdinalIgnoreCase))
             {
                 // 화면이 잠겨 있어도 그려지는 그림 (RenderTargetBitmap)
