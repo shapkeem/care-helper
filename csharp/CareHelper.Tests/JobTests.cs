@@ -251,6 +251,37 @@ public class JobTests
         dir.Delete(true);
     }
 
+    /// <summary>한셀로 저장한 엑셀: 서식이 AlternateContent(Choice 한셀용 / Fallback 엑셀용) 두 벌이라도 번호가 밀리면 안 된다.
+    /// (밀리면 서비스코드 19101 이 날짜 서식으로 읽혀 '1952-04-17' 이 됐다)</summary>
+    [Fact]
+    public void HancomAlternateContentStyles()
+    {
+        const string ns = "http://schemas.openxmlformats.org/spreadsheetml/2006/main";
+        const string mc = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+        var parts = new Dictionary<string, string>
+        {
+            ["xl/workbook.xml"] = $"<workbook xmlns=\"{ns}\" xmlns:r=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships\"><sheets><sheet name=\"S\" sheetId=\"1\" r:id=\"rId1\"/></sheets></workbook>",
+            ["xl/_rels/workbook.xml.rels"] = "<Relationships xmlns=\"http://schemas.openxmlformats.org/package/2006/relationships\"><Relationship Id=\"rId1\" Type=\"http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet\" Target=\"worksheets/sheet1.xml\"/></Relationships>",
+            ["xl/styles.xml"] = $"<x:styleSheet xmlns:x=\"{ns}\"><x:cellXfs count=\"4\">" +
+                "<x:xf numFmtId=\"0\"/>" +
+                $"<mc:AlternateContent xmlns:mc=\"{mc}\"><mc:Choice Requires=\"hs\"><x:xf numFmtId=\"0\"/></mc:Choice><mc:Fallback><x:xf numFmtId=\"0\"/></mc:Fallback></mc:AlternateContent>" +
+                "<x:xf numFmtId=\"14\"/><x:xf numFmtId=\"0\"/></x:cellXfs></x:styleSheet>",
+            ["xl/worksheets/sheet1.xml"] = $"<x:worksheet xmlns:x=\"{ns}\"><x:sheetData><x:row r=\"1\">" +
+                "<x:c r=\"A1\" s=\"2\"><x:v>19101</x:v></x:c><x:c r=\"B1\" s=\"3\"><x:v>19101</x:v></x:c></x:row></x:sheetData></x:worksheet>",
+        };
+        var ms = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+            foreach (var (name, xml) in parts)
+            {
+                using var w = new StreamWriter(zip.CreateEntry(name).Open());
+                w.Write(xml);
+            }
+        var ws = Excel.XlsxReader.Read(ms.ToArray());
+        Assert.IsType<DateTime>(ws.Cell(1, 1));       // 3번째 서식(날짜)
+        Assert.IsNotType<DateTime>(ws.Cell(1, 2));    // 4번째 서식(일반) → 숫자 그대로
+        Assert.Equal("19101", Py.Str(ws.Cell(1, 2)));
+    }
+
     [Fact]
     public void ParsePeople()
     {

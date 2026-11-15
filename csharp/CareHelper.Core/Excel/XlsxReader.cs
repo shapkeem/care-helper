@@ -175,6 +175,8 @@ public static class XlsxReader
         public readonly List<string?> CellXfFormats = new(); // 칸 서식 번호 → 숫자 서식 글자
     }
 
+    const string McNs = "http://schemas.openxmlformats.org/markup-compatibility/2006";
+
     static Styles ReadStyles(ZipArchive zip)
     {
         var st = new Styles();
@@ -186,8 +188,16 @@ public static class XlsxReader
             using var s = e.Open();
             using var r = Xml(s);
             bool inCellXfs = false;
-            while (r.Read())
+            r.Read();
+            while (!r.EOF)
             {
+                // 한컴오피스(한셀)는 서식을 <mc:AlternateContent><mc:Choice>한셀용</mc:Choice><mc:Fallback>엑셀용</mc:Fallback> 두 벌로 적는다.
+                // Choice 쪽까지 세면 서식 번호가 밀려 숫자(서비스코드 19101)가 날짜로 읽힌다. 파이썬판처럼 Fallback 만 쓴다.
+                if (r.NodeType == XmlNodeType.Element && r.LocalName == "Choice" && r.NamespaceURI == McNs)
+                {
+                    r.Skip();
+                    continue;
+                }
                 if (r.NodeType == XmlNodeType.Element)
                 {
                     if (r.LocalName == "numFmt" && int.TryParse(r.GetAttribute("numFmtId"), out var id))
@@ -203,6 +213,7 @@ public static class XlsxReader
                 }
                 else if (r.NodeType == XmlNodeType.EndElement && r.LocalName == "cellXfs")
                     inCellXfs = false;
+                r.Read();
             }
         }
         catch (XmlException)

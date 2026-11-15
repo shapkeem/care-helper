@@ -11,7 +11,7 @@
     <AssemblyName>CareHelperBridge</AssemblyName>
     <RootNamespace>CareHelper.Bridge</RootNamespace>
     <ApplicationIcon>..\CareHelper.App\icon.ico</ApplicationIcon>
-    <Version>3.6.0</Version>
+    <Version>3.6.1</Version>
     <Product>CareHelper</Product>
     <Company>CareHelper</Company>
     <Description>CareHelper</Description>
