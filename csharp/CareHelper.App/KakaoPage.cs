@@ -40,6 +40,7 @@ public partial class MainWindow
 
     void BuildKakao()
     {
+        KTodayDate.SelectedDate = DateTime.Today; // 실적 확인 날짜: 프로그램을 켠 날
         KGrid(KHdrGrid);
         for (int i = 0; i < KCols.Length; i++)
         {

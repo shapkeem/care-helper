@@ -8,10 +8,13 @@ namespace CareHelper.App;
 public partial class MainWindow
 {
     readonly Dictionary<int, (CheckBox Chk, TextBlock Result)> _todayRows = new();
+    DateOnly _todayPick; // 조회한 날 = 실적을 넣는 날
 
     void KToday_Click(object sender, RoutedEventArgs e)
     {
-        var err = _api.TodayScan();
+        var day = DateOnly.FromDateTime(KTodayDate.SelectedDate ?? DateTime.Today);
+        var err = _api.TodayScan(day);
+        if (err == null) _todayPick = day;
         if (err != null)
         {
             Toaster(err);
@@ -19,6 +22,7 @@ public partial class MainWindow
         }
         KTodayBtn.IsEnabled = false;
         KTodayBtn.Content = "확인 중...";
+        KTodayTitle.Text = $"실적 확인 ({day:M'/'d})";
         KToday.Visibility = Visibility.Visible;
         KTodaySub.Text = "지원사마다 조회하고 있어요...";
         KTodayList.Children.Clear();
@@ -31,7 +35,7 @@ public partial class MainWindow
     void TodayShow(object? d)
     {
         KTodayBtn.IsEnabled = true;
-        KTodayBtn.Content = "오늘 실적 확인";
+        KTodayBtn.Content = "실적 확인";
         KToday.Visibility = Visibility.Visible;
         KTodayList.Children.Clear();
         _todayRows.Clear();
@@ -44,7 +48,7 @@ public partial class MainWindow
         var rows = (List<TodayRow>)d!;
         int miss = rows.Count(r => r.Missing), diff = rows.Count - miss;
         KTodaySub.Text = rows.Count == 0
-            ? "지난 일정은 모두 실적이 맞게 들어가 있어요."
+            ? "끝난 일정은 모두 실적이 맞게 들어가 있어요."
             : $"실적 없음 {miss}건 · 시간 다름 {diff}건 (10분 넘게 차이). 넣으면 일정 시간 그대로 들어가요.";
         KTodayFill.IsEnabled = rows.Count > 0;
         foreach (var r in rows)
@@ -80,7 +84,7 @@ public partial class MainWindow
             Toaster("체크한 줄이 없어요.");
             return;
         }
-        if (!Ask($"체크한 {ids.Count}건에 일정 시간 그대로 실적을 넣을까요?\n(시간이 다른 실적은 [복사]→[저장]으로 일정 시간으로 바뀌어요)")) return;
+        if (!Ask($"{_todayPick:M'월 'd'일'} 일정 중 체크한 {ids.Count}건에 일정 시간 그대로 실적을 넣을까요?\n(시간이 다른 실적은 [복사]→[저장]으로 일정 시간으로 바뀌어요)")) return;
         var err = _api.TodayFill(ids);
         if (err != null)
         {

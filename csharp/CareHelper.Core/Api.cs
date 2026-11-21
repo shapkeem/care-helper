@@ -236,8 +236,8 @@ public sealed class Api
     List<TodayRow> _today = new();
     DateOnly _todayDay;
 
-    /// <summary>오늘 지난 일정 중 실적이 없거나 10분 넘게 다른 줄을 찾는다. 끝나면 k_today(List&lt;TodayRow&gt; 또는 오류 글).</summary>
-    public string? TodayScan()
+    /// <summary>그날(기본 오늘) 끝난 일정 중 실적이 없거나 10분 넘게 다른 줄을 찾는다. 끝나면 k_today(List&lt;TodayRow&gt; 또는 오류 글).</summary>
+    public string? TodayScan(DateOnly? day = null)
     {
         if (B["today"].V) return "오늘 실적을 확인하거나 넣는 중이에요.";
         B["today"].V = true;
@@ -246,11 +246,11 @@ public sealed class Api
             void Log(string m) => _emit("k_log", m);
             try
             {
-                Log("오늘 실적 확인 중... (지원사마다 조회해요)");
+                Log($"{(day ?? DateOnly.FromDateTime(DateTime.Today)):MM'/'dd} 실적 확인 중... (지원사마다 조회해요)");
                 await using var pw = await GoodeosChrome.OpenSessionAsync();
                 var page = await GoodeosChrome.GetPageAsync(pw);
                 var now = DateTime.Now + await Work.ServerOffsetAsync(page); // 날짜·시각은 goodeos 서버 기준
-                _todayDay = DateOnly.FromDateTime(now);
+                _todayDay = day ?? DateOnly.FromDateTime(now);
                 _today = await TodayResults.ScanAsync(page, _todayDay, now, Log);
                 _emit("k_today", _today);
             }

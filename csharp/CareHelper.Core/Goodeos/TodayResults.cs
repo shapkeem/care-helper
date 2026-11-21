@@ -74,7 +74,7 @@ public static class TodayResults
             if (!missing && !diff) continue;
             rows.Add(new TodayRow(rows.Count, v[0], v[1], v[2], v[3], pf, pt, rf, rt, missing));
         }
-        log($"오늘 지난 일정 중 실적 없음 {rows.Count(x => x.Missing)}건, 시간 다름 {rows.Count(x => !x.Missing)}건");
+        log($"{day:MM'/'dd} 끝난 일정 중 실적 없음 {rows.Count(x => x.Missing)}건, 시간 다름 {rows.Count(x => !x.Missing)}건");
         return rows.OrderBy(x => x.Ic, StringComparer.Ordinal).ThenBy(x => x.PlanFrom, StringComparer.Ordinal).ToList();
     }
 
