@@ -8,11 +8,49 @@ namespace CareHelper.App;
 public partial class MainWindow
 {
     readonly Dictionary<int, (CheckBox Chk, TextBlock Result)> _todayRows = new();
+    DateTime _kDay = DateTime.Today; // 실적 확인 날짜
+    static readonly System.Globalization.CultureInfo Ko = new("ko-KR");
+
+    void SetKDay(DateTime d)
+    {
+        _kDay = d.Date;
+        KDateBtn.Content = _kDay.ToString("yyyy년 M월 d일 (ddd)", Ko);
+        KDayNext.IsEnabled = _kDay < DateTime.Today && KDateBtn.IsEnabled; // 내일 이후는 끝난 일정이 없다
+        if (KCal.SelectedDate != _kDay)
+        {
+            KCal.SelectedDate = _kDay;
+            KCal.DisplayDate = _kDay;
+        }
+    }
+
+    void KDateBtn_Click(object sender, RoutedEventArgs e)
+    {
+        KCal.DisplayDateEnd = DateTime.Today;
+        KDatePop.IsOpen = true;
+    }
+
+    void KCal_Changed(object? sender, SelectionChangedEventArgs e)
+    {
+        if (KCal.SelectedDate is DateTime d && d.Date != _kDay)
+        {
+            SetKDay(d);
+            KDatePop.IsOpen = false;
+        }
+    }
+
+    void KDayPrev_Click(object sender, RoutedEventArgs e) => SetKDay(_kDay.AddDays(-1));
+    void KDayNext_Click(object sender, RoutedEventArgs e) => SetKDay(_kDay.AddDays(1));
+
+    void KDayToday_Click(object sender, RoutedEventArgs e)
+    {
+        SetKDay(DateTime.Today);
+        KDatePop.IsOpen = false;
+    }
     DateOnly _todayPick; // 조회한 날 = 실적을 넣는 날
 
     void KToday_Click(object sender, RoutedEventArgs e)
     {
-        var day = DateOnly.FromDateTime(KTodayDate.SelectedDate ?? DateTime.Today);
+        var day = DateOnly.FromDateTime(_kDay);
         var err = _api.TodayScan(day);
         if (err == null) _todayPick = day;
         if (err != null)
@@ -30,14 +68,15 @@ public partial class MainWindow
     {
         KTodayBtn.IsEnabled = !busy;
         KMonthBtn.IsEnabled = !busy;
-        KTodayDate.IsEnabled = !busy;
+        KDateBtn.IsEnabled = KDayPrev.IsEnabled = KDayNext.IsEnabled = !busy;
         if (busy) KTodayFill.IsEnabled = false;
+        else SetKDay(_kDay); // ▶ 는 오늘보다 앞일 때만
     }
 
     /// <summary>[이 달 전체 점검·넣기]: 목록 없이 바로 넣는다.</summary>
     void KMonth_Click(object sender, RoutedEventArgs e)
     {
-        var day = DateOnly.FromDateTime(KTodayDate.SelectedDate ?? DateTime.Today);
+        var day = DateOnly.FromDateTime(_kDay);
         var range = day.Year == DateTime.Today.Year && day.Month == DateTime.Today.Month ? $"{day.Month}월 1일부터 오늘까지" : $"{day.Year}년 {day.Month}월 한 달";
         if (!Ask($"{range} 끝난 일정을 모두 점검해서,\n실적이 없거나 시간이 10분 넘게 다른 것을 일정 시간 그대로 넣을까요?\n(지원사가 많으면 몇 분 걸려요)"))
             return;
