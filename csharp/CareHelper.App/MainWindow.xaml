@@ -80,7 +80,7 @@
                         <DockPanel DockPanel.Dock="Top">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
                                 <Button x:Name="KMonthBtn" Style="{StaticResource BtnSmall}" Content="이 달 전체 점검·넣기" Margin="0,0,6,0" Click="KMonth_Click"
-                                        ToolTip="고른 날의 달 1일부터 오늘까지 끝난 일정 중 실적이 없거나 시간이 다른 것을 찾아 바로 일정 시간으로 넣어요"/>
+                                        ToolTip="고른 날의 달 1일부터 오늘까지 끝난 일정 중 실적이 없거나 시간이 1분이라도 다른 것을 찾아 바로 일정 시간으로 넣어요"/>
                                 <Button x:Name="KTodayFill" Style="{StaticResource BtnSmallPrimary}" Content="체크한 줄 다 실적 넣기" Click="KTodayFill_Click" IsEnabled="False"/>
                             </StackPanel>
                             <TextBlock x:Name="KTodayTitle" Text="실적 확인" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>

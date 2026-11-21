@@ -268,7 +268,7 @@ public sealed class Api
         return null;
     }
 
-    /// <summary>[이번 달 전체 점검·넣기]: 고른 날의 달 1일~(오늘까지) 끝난 일정 중 실적이 없거나 10분 넘게 다른 것을
+    /// <summary>[이번 달 전체 점검·넣기]: 고른 날의 달 1일~(오늘까지) 끝난 일정 중 실적이 없거나 1분이라도 다른 것을
     /// 목록 없이 바로 일정 시간으로 넣는다. 끝나면 k_month_done(MsgEv).</summary>
     public string? TodayMonthFix(DateOnly anyDay)
     {
@@ -293,7 +293,7 @@ public sealed class Api
                     if (to > today) to = today;
                     if (from > to) throw new WorkError($"{anyDay.Month}월은 아직 지난 일정이 없어요.");
                     Log($"{anyDay.Month}월 전체 점검 중... ({from:MM'/'dd}~{to:MM'/'dd}, 지원사마다 조회해요)");
-                    rows = await TodayResults.ScanAsync(page, from, to, now, Log);
+                    rows = await TodayResults.ScanAsync(page, from, to, now, Log, diffMinutes: 0); // 이 달 전체는 1분 차이도 일정 시간으로
                 }
                 if (rows.Count == 0)
                     done = $"{anyDay.Month}월은 잘못된 실적이 없어요.";

@@ -13,6 +13,10 @@ public partial class App : Application
         try
         {
             Updater.CleanupOldVersions();
+            Task.Run(() =>
+            {
+                try { Updater.RefreshBridges(); } catch { } // 예전 자리의 연결 exe 를 새것으로 (화면을 늦추지 않게 뒤에서)
+            });
             new MainWindow().Show();
         }
         catch (Exception ex)

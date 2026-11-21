@@ -35,7 +35,9 @@ public static class TodayResults
         ScanAsync(page, day, day, now, log);
 
     /// <summary>기간(from~to, 같은 달 안): 끝난 일정 중 실적이 없거나 시간이 다른 줄.</summary>
-    public static async Task<List<TodayRow>> ScanAsync(IPage page, DateOnly from, DateOnly to, DateTime now, Action<string> log)
+    /// <param name="diffMinutes">실적이 일정과 이 분보다 많이 다르면 '시간 다름' (0 이면 1분이라도 다르면)</param>
+    public static async Task<List<TodayRow>> ScanAsync(IPage page, DateOnly from, DateOnly to, DateTime now, Action<string> log,
+                                                       int diffMinutes = DiffMinutes)
     {
         await page.GotoAsync(IcRstUrl);
         await page.WaitForLoadStateAsync();
@@ -82,7 +84,7 @@ public static class TodayResults
             if (!seen.Add($"{v[0]}|{v[1]}|{ds}|{pf}|{pt}")) continue; // 두 달을 볼 때 같은 줄이 겹치지 않게
             if (!Work.IsPast(day, pt, now)) continue; // 아직 안 끝난 일정은 실적이 없는 게 정상
             bool missing = rf.Length == 0 || rt.Length == 0;
-            bool diff = !missing && (Math.Abs(Min(rf) - Min(pf)) > DiffMinutes || Math.Abs(Min(rt) - Min(pt)) > DiffMinutes);
+            bool diff = !missing && (Math.Abs(Min(rf) - Min(pf)) > diffMinutes || Math.Abs(Min(rt) - Min(pt)) > diffMinutes);
             if (!missing && !diff) continue;
             rows.Add(new TodayRow(rows.Count, day, v[0], v[1], v[2], v[3], pf, pt, rf, rt, missing));
         }

@@ -174,6 +174,54 @@ public static class Updater
         Process.Start(psi)?.WaitForExit(20000);
     }
 
+    public const string BridgeName = "CareHelperBridge.exe";
+
+    /// <summary>켤 때: 파이썬판에서 넘어오며 예전 프로그램 자리에 남은 연결 exe(CareHelperBridge)를
+    /// 이 버전에 같이 들어 있는 새 연결 exe로 바꿔 끼운다 (파일 정보·회사 이름 등을 새것으로).
+    /// 바탕화면·다운로드·맞춤돌봄도우미 폴더 바로 아래에서, 원래 이름이 CareHelperBridge.exe 인 파일만 바꾼다.</summary>
+    public static int RefreshBridges(string? srcPath = null, IEnumerable<string>? searchDirs = null)
+    {
+        var src = srcPath ?? Path.Combine(AppContext.BaseDirectory, BridgeName);
+        if (!File.Exists(src)) return 0;
+        var sv = FileVersionInfo.GetVersionInfo(src);
+        var dirs = searchDirs?.ToArray() ?? new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            AppInfo.AppDataDir,
+        };
+        int n = 0;
+        foreach (var dir in dirs.Where(d => d.Length > 0 && Directory.Exists(d)).Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            IEnumerable<string> files;
+            try
+            {
+                files = Directory.EnumerateFiles(dir, "*.exe").ToList();
+            }
+            catch
+            {
+                continue;
+            }
+            foreach (var f in files)
+            {
+                try
+                {
+                    var v = FileVersionInfo.GetVersionInfo(f);
+                    if (!string.Equals(v.OriginalFilename, BridgeName, StringComparison.OrdinalIgnoreCase)) continue;
+                    if (v.FileVersion == sv.FileVersion && v.CompanyName == sv.CompanyName) continue;
+                    File.Copy(src, f, true);
+                    n++;
+                }
+                catch
+                {
+                    // 쓰기 권한이 없거나 잠겨 있으면 다음에 켤 때 다시 한다
+                }
+            }
+        }
+        return n;
+    }
+
     /// <summary>켤 때: 지금 버전이 아닌 예전 버전 폴더를 지운다 (지금 실행 중인 폴더는 남긴다).</summary>
     public static void CleanupOldVersions()
     {

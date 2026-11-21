@@ -32,10 +32,11 @@ jobs:
           $ver = (Select-String -Path "csharp/CareHelper.Core/AppInfo.cs" -Pattern 'AppVersion = "(.+)"').Matches[0].Groups[1].Value
           echo "VER=$ver" >> $env:GITHUB_ENV
           dotnet publish csharp/CareHelper.App -c Release -r win-x64 --self-contained true -p:PublishReadyToRun=true -o out/맞춤돌봄도우미
+          # 연결 exe: 파이썬판 업데이트 버튼이 받는 것 + C#판이 켤 때 예전 자리의 연결 exe 를 바꿔 끼우는 데 쓰도록 폴더에도 넣는다
+          dotnet build csharp/CareHelper.Bridge -c Release -p:Version=$ver
+          Copy-Item csharp/CareHelper.Bridge/bin/Release/net48/CareHelperBridge.exe out/맞춤돌봄도우미/CareHelperBridge.exe
           # Compress-Archive 는 한글 파일 이름이 깨질 수 있어 파이썬 zipfile 로 묶는다 (UTF-8 이름)
           python -c "import zipfile,os,sys;z=zipfile.ZipFile(sys.argv[1],'w',zipfile.ZIP_DEFLATED);[z.write(os.path.join(r,f),os.path.relpath(os.path.join(r,f),'out').replace(os.sep,'/')) for r,_,fs in os.walk('out/맞춤돌봄도우미') for f in fs];z.close()" "CareHelper-$ver-win-x64.zip"
-          # 파이썬판 업데이트 버튼이 받는 다리 exe (C#판 zip 을 받아 설치하고 켠다)
-          dotnet build csharp/CareHelper.Bridge -c Release -p:Version=$ver
           Copy-Item csharp/CareHelper.Bridge/bin/Release/net48/CareHelperBridge.exe "CareHelper-$ver.exe"
       - uses: actions/upload-artifact@v4
         with:

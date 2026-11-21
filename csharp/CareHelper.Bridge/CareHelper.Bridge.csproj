@@ -11,10 +11,11 @@
     <AssemblyName>CareHelperBridge</AssemblyName>
     <RootNamespace>CareHelper.Bridge</RootNamespace>
     <ApplicationIcon>..\CareHelper.App\icon.ico</ApplicationIcon>
-    <Version>3.6.3</Version>
+    <Version>4.0.0</Version>
     <Product>CareHelper</Product>
-    <Company>CareHelper</Company>
-    <Description>CareHelper</Description>
+    <!-- 파일 설명(속성 창·마우스 올렸을 때)은 비운다 -->
+    <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
+    <Company>김도형컴퍼니</Company>
   </PropertyGroup>
 
   <ItemGroup>

@@ -47,6 +47,11 @@ if (args[0] == "--today-scan") // 오늘 실적 확인 (읽기만): [yyyy-MM-dd]
     await GoodeosChrome.CloseAsync();
     return;
 }
+if (args[0] == "--bridge-refresh") // <새 연결 exe> <찾을 폴더>
+{
+    Console.WriteLine("replaced=" + Updater.RefreshBridges(args[1], new[] { args[2] }));
+    return;
+}
 if (args[0] == "--fix-test") // 오류 파일 화면에서 칸마다 값을 넣고 '고른 대로 계속'을 누른 것처럼 돌려 결과를 본다: <local 폴더>
 {
     var loc = args[1];

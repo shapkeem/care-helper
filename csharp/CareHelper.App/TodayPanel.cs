@@ -78,7 +78,7 @@ public partial class MainWindow
     {
         var day = DateOnly.FromDateTime(_kDay);
         var range = day.Year == DateTime.Today.Year && day.Month == DateTime.Today.Month ? $"{day.Month}월 1일부터 오늘까지" : $"{day.Year}년 {day.Month}월 한 달";
-        if (!Ask($"{range} 끝난 일정을 모두 점검해서,\n실적이 없거나 시간이 10분 넘게 다른 것을 일정 시간 그대로 넣을까요?\n(지원사가 많으면 몇 분 걸려요)"))
+        if (!Ask($"{range} 끝난 일정을 모두 점검해서,\n실적이 없거나 시간이 1분이라도 다른 것을 일정 시간 그대로 넣을까요?\n(지원사가 많으면 몇 분 걸려요)"))
             return;
         var err = _api.TodayMonthFix(day);
         if (err != null)
