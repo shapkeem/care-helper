@@ -5,7 +5,7 @@ using Microsoft.Playwright;
 namespace CareHelper.Goodeos;
 
 /// <summary>오늘 실적 확인 줄: 지난 일정 중 실적이 없거나(Missing) 실적 시간이 일정과 10분 넘게 다른 것.</summary>
-public sealed record TodayRow(int Id, string Ic, string Person, string Birth, string Svc,
+public sealed record TodayRow(int Id, DateOnly Day, string Ic, string Person, string Birth, string Svc,
                               string PlanFrom, string PlanTo, string ResFrom, string ResTo, bool Missing)
 {
     public string PlanText => $"{PlanFrom[..2]}:{PlanFrom[2..]}~{PlanTo[..2]}:{PlanTo[2..]}";
@@ -30,52 +30,65 @@ public static class TodayResults
         return d.Length >= 4 ? d[..4] : "";
     }
 
-    /// <summary>오늘 지난 일정 중 실적이 없거나 시간이 다른 줄.</summary>
-    public static async Task<List<TodayRow>> ScanAsync(IPage page, DateOnly day, DateTime now, Action<string> log)
+    /// <summary>하루: 그날 끝난 일정 중 실적이 없거나 시간이 다른 줄.</summary>
+    public static Task<List<TodayRow>> ScanAsync(IPage page, DateOnly day, DateTime now, Action<string> log) =>
+        ScanAsync(page, day, day, now, log);
+
+    /// <summary>기간(from~to, 같은 달 안): 끝난 일정 중 실적이 없거나 시간이 다른 줄.</summary>
+    public static async Task<List<TodayRow>> ScanAsync(IPage page, DateOnly from, DateOnly to, DateTime now, Action<string> log)
     {
         await page.GotoAsync(IcRstUrl);
         await page.WaitForLoadStateAsync();
-        var (py, pm) = Work.PlanMonth(day);
-        var months = new List<(int Y, int M)> { (day.Year, day.Month) };
-        if ((py, pm) != (day.Year, day.Month)) months.Add((py, pm));
+        // 맞광 일정표는 주의 일요일이 속한 달로 묶이므로, 기간의 달과 그 날들이 속한 일정표 달을 모두 본다
+        var months = new List<(int Y, int M)>();
+        for (var d = from; d <= to; d = d.AddDays(1))
+            foreach (var ym in new[] { (d.Year, d.Month), Work.PlanMonth(d) })
+                if (!months.Contains(ym)) months.Add(ym);
         var raw = await page.EvaluateAsync<JsonElement>(@"async (a) => {
             const post = async (url, data) => (await fetch(url, {method: 'POST', body: new URLSearchParams(data)})).text();
             // 지원사 목록 (전담복지사별)
-            const wk = [...document.querySelectorAll('.btn-weekly')].find(b => b.getAttribute('from_dt') <= a.day && a.day <= b.getAttribute('to_dt'));
+            const wk = [...document.querySelectorAll('.btn-weekly')].find(b => b.getAttribute('from_dt') <= a.to && a.to <= b.getAttribute('to_dt'))
+                    || [...document.querySelectorAll('.btn-weekly')].find(b => b.getAttribute('to_dt'));
             const icTxt = await post('../worklog/ic_find.php', {year: a.months[0][0], month: a.months[0][1],
-                week_index: wk ? wk.getAttribute('week_index') : '1', date: wk ? wk.getAttribute('to_dt') : a.day, sw_cd: '', ic_cd: ''});
+                week_index: wk ? wk.getAttribute('week_index') : '1', date: wk ? wk.getAttribute('to_dt') : a.to, sw_cd: '', ic_cd: ''});
             const ics = JSON.parse(icTxt);
             const out = [];
             for (const sw of Object.keys(ics)) for (const ic of Object.keys(ics[sw])) for (const [y, m] of a.months) {
                 const h = await post('./ic_rst_new_search.php', {year: y, month: m, week_index: '0', sw_cd: sw, ic_cd: ic});
                 const d = new DOMParser().parseFromString('<table><tbody>' + h + '</tbody></table>', 'text/html');
-                for (const tr of d.querySelectorAll('tr[date=""' + a.day + '""]')) {
+                for (const tr of d.querySelectorAll('tr[date]')) {
+                    const dt = tr.getAttribute('date');
+                    if (dt < a.from || dt > a.to) continue;
                     const c = [...tr.cells].map(x => x.innerText.trim());
                     const f = tr.querySelector('#from_time'), t = tr.querySelector('#to_time');
                     if (!f || !t) continue;
-                    out.push([ics[sw][ic], c[3] || '', c[4] || '', c[7] || '',
+                    out.push([ics[sw][ic], c[3] || '', c[4] || '', c[7] || '', dt,
                               f.getAttribute('plantime') || '', t.getAttribute('plantime') || '', f.value || '', t.value || '']);
                 }
             }
             return out;
-        }", new { day = day.ToString("yyyyMMdd"), months = months.Select(x => new[] { x.Y, x.M }).ToArray() });
+        }", new { from = from.ToString("yyyyMMdd"), to = to.ToString("yyyyMMdd"), months = months.Select(x => new[] { x.Y, x.M }).ToArray() });
         var rows = new List<TodayRow>();
         var seen = new HashSet<string>();
         foreach (var r in raw.EnumerateArray())
         {
             var v = r.Strings();
-            if (v.Count < 8) continue;
-            string pf = Hhmm(v[4]), pt = Hhmm(v[5]), rf = Hhmm(v[6]), rt = Hhmm(v[7]);
+            if (v.Count < 9) continue;
+            var ds = v[4];
+            if (ds.Length != 8) continue;
+            var day = new DateOnly(int.Parse(ds[..4]), int.Parse(ds[4..6]), int.Parse(ds[6..]));
+            string pf = Hhmm(v[5]), pt = Hhmm(v[6]), rf = Hhmm(v[7]), rt = Hhmm(v[8]);
             if (pf.Length == 0 || pt.Length == 0) continue;
-            if (!seen.Add($"{v[0]}|{v[1]}|{pf}|{pt}")) continue; // 두 달을 볼 때 같은 줄이 겹치지 않게
+            if (!seen.Add($"{v[0]}|{v[1]}|{ds}|{pf}|{pt}")) continue; // 두 달을 볼 때 같은 줄이 겹치지 않게
             if (!Work.IsPast(day, pt, now)) continue; // 아직 안 끝난 일정은 실적이 없는 게 정상
             bool missing = rf.Length == 0 || rt.Length == 0;
             bool diff = !missing && (Math.Abs(Min(rf) - Min(pf)) > DiffMinutes || Math.Abs(Min(rt) - Min(pt)) > DiffMinutes);
             if (!missing && !diff) continue;
-            rows.Add(new TodayRow(rows.Count, v[0], v[1], v[2], v[3], pf, pt, rf, rt, missing));
+            rows.Add(new TodayRow(rows.Count, day, v[0], v[1], v[2], v[3], pf, pt, rf, rt, missing));
         }
-        log($"{day:MM'/'dd} 끝난 일정 중 실적 없음 {rows.Count(x => x.Missing)}건, 시간 다름 {rows.Count(x => !x.Missing)}건");
-        return rows.OrderBy(x => x.Ic, StringComparer.Ordinal).ThenBy(x => x.PlanFrom, StringComparer.Ordinal).ToList();
+        var when = from == to ? $"{from:MM'/'dd}" : $"{from:MM'/'dd}~{to:MM'/'dd}";
+        log($"{when} 끝난 일정 중 실적 없음 {rows.Count(x => x.Missing)}건, 시간 다름 {rows.Count(x => !x.Missing)}건");
+        return rows.OrderBy(x => x.Day).ThenBy(x => x.Ic, StringComparer.Ordinal).ThenBy(x => x.PlanFrom, StringComparer.Ordinal).ToList();
     }
 
     /// <summary>한 줄을 일정 시간 그대로 실적으로 넣는다. 시간이 다른 실적도 지우지 않고 [복사]→[저장]으로 일정 시간으로 바꾼다.</summary>
@@ -113,7 +126,7 @@ public static class TodayResults
 public static class TodayResultsRunner
 {
     /// <summary>[다 실적 넣기]: 어르신별로 묶어 탭 3개로 나눠 넣는다 (같은 어르신 줄은 한 탭에서 차례로 → 서로 덮어쓰지 않음).</summary>
-    public static async Task FixAllAsync(List<TodayRow> rows, DateOnly day, Action<int, bool, string> onOne, Action<string> log, int tabs = 3)
+    public static async Task FixAllAsync(List<TodayRow> rows, Action<int, bool, string> onOne, Action<string> log, int tabs = 3)
     {
         try
         {
@@ -147,7 +160,7 @@ public static class TodayResultsRunner
                         {
                             try
                             {
-                                await TodayResults.FixOneAsync(page, dlg, r, day, log);
+                                await TodayResults.FixOneAsync(page, dlg, r, r.Day, log);
                                 onOne(r.Id, true, "일정 시간으로 실적을 넣었어요.");
                             }
                             catch (Exception e)

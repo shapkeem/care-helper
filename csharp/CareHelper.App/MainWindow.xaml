@@ -62,10 +62,6 @@
             <DockPanel x:Name="PageKakao" Visibility="Collapsed">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
-                        <DatePicker x:Name="KTodayDate" Width="130" Height="34" VerticalContentAlignment="Center" Margin="0,0,4,0"
-                                    SelectedDateFormat="Short" ToolTip="실적을 확인할 날짜 (기본은 오늘)"/>
-                        <Button x:Name="KTodayBtn" Style="{StaticResource Btn}" Content="실적 확인" Click="KToday_Click" Margin="0,0,6,0"
-                                ToolTip="고른 날 이미 끝난 일정 중 실적이 없거나, 실적 시간이 일정과 10분 넘게 다른 것을 찾아요"/>
                         <Button Style="{StaticResource Btn}" Content="멈춤" Click="KStop_Click" Margin="0,0,6,0"/>
                         <Button x:Name="KStartBtn" Style="{StaticResource Btn}" Content="읽기" Click="KStart_Click" Margin="0,0,6,0"/>
                         <Button x:Name="KRunBtn" Style="{StaticResource BtnPrimary}" Content="실행" Click="KRun_Click"/>
@@ -78,16 +74,24 @@
                 <TextBox x:Name="KText" DockPanel.Dock="Top" Height="100" AcceptsReturn="True" TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" Margin="0,2,0,6"/>
                 <TextBlock x:Name="KStatus" DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
-                <!-- 오늘 실적 확인 결과 -->
-                <Border x:Name="KToday" DockPanel.Dock="Top" BorderBrush="#93C5FD" BorderThickness="2" CornerRadius="12" Padding="10,8" Margin="0,6,0,0" Visibility="Collapsed">
+                <!-- 실적 확인: 날짜를 골라 그날 조회 / 이 달 전체 점검·넣기 -->
+                <Border x:Name="KToday" DockPanel.Dock="Top" BorderBrush="#93C5FD" BorderThickness="2" CornerRadius="12" Padding="10,8" Margin="0,6,0,0">
                     <DockPanel>
                         <DockPanel DockPanel.Dock="Top">
-                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="닫기" Margin="6,0,0,0" Click="KTodayClose_Click"/>
-                            <Button x:Name="KTodayFill" DockPanel.Dock="Right" Style="{StaticResource BtnSmallPrimary}" Content="체크한 줄 다 실적 넣기" Click="KTodayFill_Click"/>
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
+                                <Button x:Name="KMonthBtn" Style="{StaticResource BtnSmall}" Content="이 달 전체 점검·넣기" Margin="0,0,6,0" Click="KMonth_Click"
+                                        ToolTip="고른 날의 달 1일부터 오늘까지 끝난 일정 중 실적이 없거나 시간이 다른 것을 찾아 바로 일정 시간으로 넣어요"/>
+                                <Button x:Name="KTodayFill" Style="{StaticResource BtnSmallPrimary}" Content="체크한 줄 다 실적 넣기" Click="KTodayFill_Click" IsEnabled="False"/>
+                            </StackPanel>
                             <TextBlock x:Name="KTodayTitle" Text="실적 확인" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
-                            <TextBlock x:Name="KTodaySub" FontSize="12" Foreground="{StaticResource Muted}" Margin="8,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                            <DatePicker x:Name="KTodayDate" Width="130" Height="30" VerticalContentAlignment="Center" Margin="10,0,4,0"
+                                        SelectedDateFormat="Short" ToolTip="실적을 확인할 날짜 (기본은 오늘)"/>
+                            <Button x:Name="KTodayBtn" Style="{StaticResource BtnSmall}" Content="조회" Click="KToday_Click" Margin="0,0,6,0" HorizontalAlignment="Left"
+                                    ToolTip="고른 날 이미 끝난 일정 중 실적이 없거나, 실적 시간이 일정과 10분 넘게 다른 것을 찾아요"/>
                         </DockPanel>
-                        <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                        <TextBlock x:Name="KTodaySub" DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap"
+                                   Text="날짜를 고르고 [조회]를 누르면 실적이 없거나 시간이 다른 일정을 보여 줘요."/>
+                        <ScrollViewer x:Name="KTodayScroll" MaxHeight="200" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0" Visibility="Collapsed">
                             <StackPanel x:Name="KTodayList"/>
                         </ScrollViewer>
                     </DockPanel>

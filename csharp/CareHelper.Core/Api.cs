@@ -268,6 +268,69 @@ public sealed class Api
         return null;
     }
 
+    /// <summary>[이번 달 전체 점검·넣기]: 고른 날의 달 1일~(오늘까지) 끝난 일정 중 실적이 없거나 10분 넘게 다른 것을
+    /// 목록 없이 바로 일정 시간으로 넣는다. 끝나면 k_month_done(MsgEv).</summary>
+    public string? TodayMonthFix(DateOnly anyDay)
+    {
+        if (B["today"].V) return "실적을 확인하거나 넣는 중이에요.";
+        if (B["kakao"].V) return "카톡 요청을 처리하는 중이에요. 끝난 뒤에 눌러 주세요.";
+        B["today"].V = true;
+        Thread(async () =>
+        {
+            void Log(string m) => _emit("k_log", m);
+            string done;
+            bool allOk = true;
+            try
+            {
+                List<TodayRow> rows;
+                await using (var pw = await GoodeosChrome.OpenSessionAsync())
+                {
+                    var page = await GoodeosChrome.GetPageAsync(pw);
+                    var now = DateTime.Now + await Work.ServerOffsetAsync(page);
+                    var today = DateOnly.FromDateTime(now);
+                    var from = new DateOnly(anyDay.Year, anyDay.Month, 1);
+                    var to = from.AddMonths(1).AddDays(-1);
+                    if (to > today) to = today;
+                    if (from > to) throw new WorkError($"{anyDay.Month}월은 아직 지난 일정이 없어요.");
+                    Log($"{anyDay.Month}월 전체 점검 중... ({from:MM'/'dd}~{to:MM'/'dd}, 지원사마다 조회해요)");
+                    rows = await TodayResults.ScanAsync(page, from, to, now, Log);
+                }
+                if (rows.Count == 0)
+                    done = $"{anyDay.Month}월은 잘못된 실적이 없어요.";
+                else
+                {
+                    Log($"{rows.Count}건을 일정 시간으로 넣는 중... (오래 걸릴 수 있어요)");
+                    int ok = 0, bad = 0;
+                    await TodayResultsRunner.FixAllAsync(rows, (id, good, msg) =>
+                    {
+                        if (good) Interlocked.Increment(ref ok);
+                        else
+                        {
+                            Interlocked.Increment(ref bad);
+                            var r = rows.First(x => x.Id == id);
+                            Log($"  [못 넣음] {r.Day:MM'/'dd} {r.Ic} · {r.Person} {r.PlanText}: {msg}");
+                        }
+                    }, Log);
+                    allOk = bad == 0;
+                    done = $"{anyDay.Month}월 점검 끝: {ok}건 넣음" + (bad > 0 ? $", {bad}건 못 넣음 (아래 기록 확인)" : "");
+                }
+            }
+            catch (Exception e)
+            {
+                allOk = false;
+                done = $"{anyDay.Month}월 점검을 하지 못했어요: {e.Message}";
+            }
+            finally
+            {
+                B["today"].V = false;
+                GoodeosChrome.ScheduleClose();
+            }
+            Log(done);
+            _emit("k_month_done", new MsgEv(allOk, done));
+        });
+        return null;
+    }
+
     /// <summary>고른 줄(ids)에 일정 시간 그대로 실적을 넣는다. 줄마다 k_today_one(TodayOneEv), 끝나면 k_today_done.</summary>
     public string? TodayFill(List<int> ids)
     {
@@ -283,7 +346,7 @@ public sealed class Api
             try
             {
                 Log($"실적 넣는 중... ({rows.Count}건)");
-                await TodayResultsRunner.FixAllAsync(rows, _todayDay, (id, good, msg) =>
+                await TodayResultsRunner.FixAllAsync(rows, (id, good, msg) =>
                 {
                     if (good) Interlocked.Increment(ref ok); else Interlocked.Increment(ref bad);
                     _emit("k_today_one", new TodayOneEv(id, good, msg));

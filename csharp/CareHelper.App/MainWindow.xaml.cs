@@ -418,6 +418,9 @@ public partial class MainWindow : Window
             case "k_today_one":
                 TodayOne((TodayOneEv)d!);
                 break;
+            case "k_month_done":
+                MonthDone((MsgEv)d!);
+                break;
             case "k_today_done":
                 TodayDone((MsgEv)d!);
                 break;

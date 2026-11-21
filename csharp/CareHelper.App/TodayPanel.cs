@@ -20,23 +20,50 @@ public partial class MainWindow
             Toaster(err);
             return;
         }
-        KTodayBtn.IsEnabled = false;
-        KTodayBtn.Content = "확인 중...";
-        KTodayTitle.Text = $"실적 확인 ({day:M'/'d})";
-        KToday.Visibility = Visibility.Visible;
-        KTodaySub.Text = "지원사마다 조회하고 있어요...";
+        TodayBusy(true);
+        KTodaySub.Text = $"{day:M'/'d} 일정을 지원사마다 조회하고 있어요...";
         KTodayList.Children.Clear();
         KTodayFill.IsEnabled = false;
     }
 
-    void KTodayClose_Click(object sender, RoutedEventArgs e) => KToday.Visibility = Visibility.Collapsed;
+    void TodayBusy(bool busy)
+    {
+        KTodayBtn.IsEnabled = !busy;
+        KMonthBtn.IsEnabled = !busy;
+        KTodayDate.IsEnabled = !busy;
+        if (busy) KTodayFill.IsEnabled = false;
+    }
+
+    /// <summary>[이 달 전체 점검·넣기]: 목록 없이 바로 넣는다.</summary>
+    void KMonth_Click(object sender, RoutedEventArgs e)
+    {
+        var day = DateOnly.FromDateTime(KTodayDate.SelectedDate ?? DateTime.Today);
+        var range = day.Year == DateTime.Today.Year && day.Month == DateTime.Today.Month ? $"{day.Month}월 1일부터 오늘까지" : $"{day.Year}년 {day.Month}월 한 달";
+        if (!Ask($"{range} 끝난 일정을 모두 점검해서,\n실적이 없거나 시간이 10분 넘게 다른 것을 일정 시간 그대로 넣을까요?\n(지원사가 많으면 몇 분 걸려요)"))
+            return;
+        var err = _api.TodayMonthFix(day);
+        if (err != null)
+        {
+            Toaster(err);
+            return;
+        }
+        TodayBusy(true);
+        KTodayScroll.Visibility = Visibility.Collapsed;
+        KTodaySub.Text = $"{day.Month}월 전체를 점검하고 넣는 중이에요... (진행 상황은 아래 기록에 나와요)";
+    }
+
+    void MonthDone(MsgEv m)
+    {
+        TodayBusy(false);
+        KTodaySub.Text = m.Msg;
+        Toaster(m.Msg);
+    }
 
     /// <summary>조회 결과 (List&lt;TodayRow&gt;) 또는 오류 글.</summary>
     void TodayShow(object? d)
     {
-        KTodayBtn.IsEnabled = true;
-        KTodayBtn.Content = "실적 확인";
-        KToday.Visibility = Visibility.Visible;
+        TodayBusy(false);
+        KTodayScroll.Visibility = Visibility.Visible;
         KTodayList.Children.Clear();
         _todayRows.Clear();
         if (d is string err)
@@ -91,8 +118,7 @@ public partial class MainWindow
             Toaster(err);
             return;
         }
-        KTodayFill.IsEnabled = false;
-        KTodayBtn.IsEnabled = false;
+        TodayBusy(true);
         foreach (var id in ids)
         {
             _todayRows[id].Result.Text = "넣는 중...";
@@ -111,8 +137,8 @@ public partial class MainWindow
 
     void TodayDone(MsgEv m)
     {
+        TodayBusy(false);
         KTodayFill.IsEnabled = true;
-        KTodayBtn.IsEnabled = true;
         KTodaySub.Text = m.Msg;
         Toaster(m.Msg);
     }

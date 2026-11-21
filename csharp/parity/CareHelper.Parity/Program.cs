@@ -39,10 +39,11 @@ if (args[0] == "--today-scan") // 오늘 실적 확인 (읽기만): [yyyy-MM-dd]
     await using var pw0 = await GoodeosChrome.OpenSessionAsync();
     var pg = await GoodeosChrome.GetPageAsync(pw0);
     var t0 = DateTime.Now;
-    var rows0 = await TodayResults.ScanAsync(pg, day, day.ToDateTime(new TimeOnly(23, 59)), m => Console.WriteLine("log: " + m));
+    var day2 = args.Length > 2 ? DateOnly.Parse(args[2]) : day;
+    var rows0 = await TodayResults.ScanAsync(pg, day, day2, day2.ToDateTime(new TimeOnly(23, 59)), m => Console.WriteLine("log: " + m));
     Console.WriteLine($"sec={(DateTime.Now - t0).TotalSeconds:0.0} rows={rows0.Count}");
     foreach (var r in rows0.Take(40))
-        Console.WriteLine($"  {r.Ic} | {r.Person} | 일정 {r.PlanText} | 실적 {r.ResText} | {(r.Missing ? "없음" : "다름")} | {r.Svc}");
+        Console.WriteLine($"  {r.Day:MM-dd} {r.Ic} | {r.Person} | 일정 {r.PlanText} | 실적 {r.ResText} | {(r.Missing ? "없음" : "다름")} | {r.Svc}");
     await GoodeosChrome.CloseAsync();
     return;
 }
