@@ -348,10 +348,13 @@ public partial class MainWindow
     void ErMark(int k, int n, string? fixedValue)
     {
         if (!_erMsgs.TryGetValue((k, n), out var msg)) return;
-        var orig = _erFiles.First(x => x.Id == k).Errors[n].Text;
+        var item = _erFiles.First(x => x.Id == k).Errors[n];
+        var orig = item.Text;
         if (fixedValue != null)
         {
-            msg.Text = $"✓ 고침 → '{fixedValue}'   ({orig})";
+            msg.Text = fixedValue == Converter.StretchToken && item.Stretch != null
+                ? $"✓ 빈 시간으로 채움 → {item.Stretch}"
+                : $"✓ 고침 → '{fixedValue}'   ({orig})";
             msg.Foreground = B("#166534");
         }
         else
@@ -418,6 +421,20 @@ public partial class MainWindow
                         cf = new TextBox { Width = 180, FontSize = 12, Height = 28, Padding = new Thickness(6, 0, 6, 0) };
                     DockPanel.SetDock(cf, Dock.Right);
                     line.Children.Add(cf);
+                    if (e.Stretch != null) // 계획시간이 모자란 줄: 빈 시간으로 채우기
+                    {
+                        var sb = new Button { Style = (Style)FindResource("BtnTiny"), Content = "빈 시간으로 채우기", Margin = new Thickness(6, 0, 6, 0),
+                                              ToolTip = e.Stretch };
+                        int sk = f.Id;
+                        sb.Click += (_, _) =>
+                        {
+                            if (cf is CellField c0) c0.Text = Converter.StretchToken;
+                            else ((TextBox)cf).Text = Converter.StretchToken;
+                            ErFix(sk);
+                        };
+                        DockPanel.SetDock(sb, Dock.Right);
+                        line.Children.Add(sb);
+                    }
                     var hint = Label($"{e.Field} 고치기 (지금 '{e.Value}')", 11, fg: Res("Muted"));
                     hint.Margin = new Thickness(8, 0, 6, 0);
                     DockPanel.SetDock(hint, Dock.Right);
@@ -438,6 +455,13 @@ public partial class MainWindow
                 _erMsgs[(f.Id, n)] = msg;
                 line.Children.Add(msg);
                 ErList.Children.Add(line);
+                if (e.Info != null || e.Stretch != null) // 지금 시간대·몇 시까지·다음 일정과 겹침, 빈 시간으로 채우면 바뀌는 것
+                {
+                    var info = Label("ⓘ " + string.Join("\n   ", new[] { e.Info, e.Stretch != null ? "[빈 시간으로 채우기] " + e.Stretch : null }
+                                         .Where(x => x != null)), 11, fg: Res("Muted"), wrap: true);
+                    info.Margin = new Thickness(20, 0, 8, 4);
+                    ErList.Children.Add(info);
+                }
             }
             ErPick(f.Id, "separate");
         }

@@ -24,6 +24,8 @@ public sealed class ErrorAskItem
     public string? Field;
     public string Value = "";
     public List<string>? Choices;
+    public string? Info;     // 종료시간 오류: 지금 시간대·몇 시까지·다음 일정과 겹침
+    public string? Stretch;  // '빈 시간으로 채우기'로 바뀌는 내용 (못 하면 null)
 }
 
 /// <summary>화면의 답: 합칠지(merge) 따로 뺄지(separate), 오류 번호 → 고친 값.</summary>
@@ -445,6 +447,118 @@ public static class Converter
         return null;
     }
 
+    // ---------------------------------------------------------------- 계획시간 부족: 빈 시간으로 채우기
+    /// <summary>종료시간 고치기 칸에 이 글자를 넣으면 '빈 시간으로 채우기'로 고친다.</summary>
+    public const string StretchToken = "빈 시간으로 채우기";
+
+    static string Hm(int m) => $"{m / 60:00}{m % 60:00}";
+
+    /// <summary>이 서비스의 최소 계획시간(분). 전화는 0.</summary>
+    static int NeedMinutes(object?[] row)
+    {
+        var code = CleanServiceCode(row[ColCode]);
+        if (PhoneCodes.Contains(code)) return 0;
+        return EduCodes.ContainsKey(code) ? EduMinMinutes : MinMinutes;
+    }
+
+    /// <summary>같은 날 다른 줄들 (지울 줄 빼고, 시간을 읽을 수 있는 것만): (줄, 시작분, 끝분)</summary>
+    static List<(int Row, int S, int E)> SameDay(FileJob job, int i)
+    {
+        var d = NormalizeDate(job.Grid[i][ColDate]);
+        var list = new List<(int, int, int)>();
+        for (int j = 0; j < job.Grid.Count; j++)
+        {
+            if (j == i || job.DroppedRows.ContainsKey(j)) continue;
+            var r = job.Grid[j];
+            if (NormalizeDate(r[ColDate]) != d) continue;
+            var s = NormalizeTime(r[ColStart]);
+            var e = NormalizeTime(r[ColEnd]);
+            if (s == null || e == null) continue;
+            list.Add((j, TimeToMinutes(s), TimeToMinutes(e)));
+        }
+        return list;
+    }
+
+    public sealed record StretchPlan(List<(int Row, int S, int E)> Moves, string Desc);
+
+    /// <summary>계획시간이 모자란 줄을 빈 시간으로 채우는 방법:
+    /// ① 바로 앞 일정과의 빈 시간만큼 시작을 당긴다 (다른 일정은 안 움직임)
+    /// ② 그래도 모자라면 끝을 늘리고, 겹치는 뒤 일정을 그만큼 미룬다. 중간에 빈 시간이 나오면 거기서 멈춘다.
+    /// 모자라지 않거나 23:59를 넘으면 null.</summary>
+    public static StretchPlan? PlanStretch(FileJob job, int i)
+    {
+        var row = job.Grid[i];
+        var s0 = NormalizeTime(row[ColStart]);
+        var e0 = NormalizeTime(row[ColEnd]);
+        if (s0 == null || e0 == null) return null;
+        int S = TimeToMinutes(s0), E = TimeToMinutes(e0), need = NeedMinutes(row);
+        int lack = need - (E - S);
+        if (lack <= 0 || E < S) return null;
+        var others = SameDay(job, i);
+        // ① 앞 빈 시간 (앞 일정이 없으면 그만큼 일찍 시작해도 된다)
+        var before = others.Where(o => o.S < S).ToList();
+        int floor = before.Count > 0 ? before.Max(o => o.E) : Math.Max(0, S - lack);
+        int take = Math.Min(lack, Math.Max(0, S - floor));
+        int newS = S - take, rest = lack - take, newE = E + rest;
+        var moves = new List<(int Row, int S, int E)> { (i, newS, newE) };
+        // ② 뒤 일정 미루기 (빈 시간에서 멈춤)
+        int cur = newE;
+        foreach (var o in others.Where(o => o.S >= S).OrderBy(o => o.S).ThenBy(o => o.E))
+        {
+            if (o.S >= cur) break;
+            int shift = cur - o.S;
+            moves.Add((o.Row, o.S + shift, o.E + shift));
+            cur = o.E + shift;
+        }
+        if (moves.Any(m => m.E > 23 * 60 + 59)) return null;
+        string Who(int r) => $"{job.RowNums[r]}행 {NormStr(job.Grid[r][ColName])}";
+        var lines = new List<string>();
+        foreach (var (r, ns, ne) in moves)
+        {
+            var (os, oe) = r == i ? (S, E) : others.First(o => o.Row == r) is var o ? (o.S, o.E) : (0, 0);
+            lines.Add($"{Who(r)} {Hm(os)}~{Hm(oe)} → {Hm(ns)}~{Hm(ne)}");
+        }
+        var how = new List<string>();
+        if (take > 0) how.Add($"앞 빈 시간 {take}분");
+        if (rest > 0) how.Add(moves.Count > 1 ? $"뒤 일정 {moves.Count - 1}개를 미루고 {Hm(cur)} 뒤 빈 시간에서 맞춤" : $"끝을 {rest}분 늘림");
+        return new StretchPlan(moves, string.Join(", ", how) + ": " + string.Join(" / ", lines));
+    }
+
+    /// <summary>종료시간 오류 줄 설명: 지금 시간대, 몇 시까지 늘려야 하는지, 다음 일정과 겹치는지.</summary>
+    public static string? TimeInfo(FileJob job, int i)
+    {
+        var row = job.Grid[i];
+        var s0 = NormalizeTime(row[ColStart]);
+        if (s0 == null) return null;
+        var e0 = NormalizeTime(row[ColEnd]);
+        int S = TimeToMinutes(s0), need = NeedMinutes(row);
+        var parts = new List<string>();
+        if (e0 != null) parts.Add($"지금 {s0}~{e0} ({TimeToMinutes(e0) - S}분)");
+        else parts.Add($"지금 {s0}~(끝 시간을 읽을 수 없음)");
+        int want = S + need;
+        if (need > 0 && (e0 == null || TimeToMinutes(e0) < want)) parts.Add($"{need}분이 되려면 {Hm(want)}까지");
+        var next = SameDay(job, i).Where(o => o.S >= S).OrderBy(o => o.S).FirstOrDefault();
+        if (next != default)
+        {
+            var t = $"다음 일정: {job.RowNums[next.Row]}행 {NormStr(job.Grid[next.Row][ColName])} {Hm(next.S)}~{Hm(next.E)}";
+            if (want > next.S) t += $" → {Hm(want)}까지 늘리면 {want - next.S}분 겹쳐요";
+            else t += " (늘려도 안 겹쳐요)";
+            parts.Add(t);
+        }
+        return string.Join(" · ", parts);
+    }
+
+    static void ApplyStretch(FileJob job, StretchPlan plan, Action<string> log)
+    {
+        foreach (var (r, s, e) in plan.Moves)
+        {
+            job.Grid[r][ColStart] = Hm(s);
+            job.Grid[r][ColEnd] = Hm(e);
+            job.Proposals = job.Proposals.Where(p => !p.Cells.Contains((r, ColStart)) && !p.Cells.Contains((r, ColEnd))).ToList();
+        }
+        log($"[수정] {job.WorkerName} 빈 시간으로 채우기 — {plan.Desc}");
+    }
+
     /// <summary>오류 칸에 새로 넣은 값 확인 → (문제, {칸: 값}, 대상자). 문제가 없으면 (null, 바꿀 값들, …).</summary>
     public static (string? Problem, Dictionary<int, object?> Values, Beneficiary? Entry) CheckFix(FileJob job, int i, int col, string? text)
     {
@@ -488,6 +602,13 @@ public static class Converter
             var problem = PeriodProblem(entry, d);
             return problem != null ? (problem, none, null) : (null, new() { [ColDate] = d.Value }, null);
         }
+        if (col == ColEnd && text == StretchToken)
+        {
+            var plan = PlanStretch(job, i);
+            if (plan == null) return ("빈 시간으로 채울 수 없어요 (시간이 모자라지 않거나, 미루면 밤 12시를 넘어요).", none, null);
+            var me = plan.Moves[0];
+            return (null, new() { [ColStart] = Hm(me.S), [ColEnd] = Hm(me.E) }, null);
+        }
         if (col == ColEnd)
         {
             var t = NormalizeTime(first);
@@ -516,6 +637,12 @@ public static class Converter
             log($"  [수정 안 됨] {msg}: {problem}");
             return false;
         }
+        if (col == ColEnd && text.Trim() == StretchToken)
+        {
+            ApplyStretch(job, PlanStretch(job, i)!, log);
+            job.Errors.Remove(msg);
+            return true;
+        }
         if (entry != null) job.RowEntries[i] = entry;
         var old = DisplayValue(job.Grid[i][col]);
         foreach (var (c, v) in values) job.Grid[i][c] = v;
@@ -542,11 +669,16 @@ public static class Converter
             {
                 bool has = j.ErrorCells.TryGetValue(m, out var cell);
                 bool fixable = has && FixFields.ContainsKey(cell.Col);
+                bool endCol = fixable && cell.Col == ColEnd;
+                var st = endCol ? NormalizeTime(j.Grid[cell.Row][ColStart]) : null;
                 ask.Errors.Add(new ErrorAskItem
                 {
                     Text = m, Field = fixable ? FixFields[cell.Col] : null,
-                    Value = fixable ? DisplayValue(j.Grid[cell.Row][cell.Col]) : "",
+                    // 종료시간은 시작~끝으로 보여 준다 (끝만 보면 언제부터인지 모름)
+                    Value = !fixable ? "" : endCol && st != null ? $"{st}~{DisplayValue(j.Grid[cell.Row][ColEnd])}" : DisplayValue(j.Grid[cell.Row][cell.Col]),
                     Choices = fixable ? FixChoices(j, cell.Col) : null,
+                    Info = endCol ? TimeInfo(j, cell.Row) : null,
+                    Stretch = endCol ? PlanStretch(j, cell.Row)?.Desc : null,
                 });
             }
             asks.Add(ask);

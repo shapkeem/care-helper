@@ -69,6 +69,12 @@ public partial class MainWindow
                 new ErrorAskItem { Text = "4행 서비스코드 '13202' 코드표에 없음", Field = "서비스코드", Value = "13202", Choices = new() { "43202 청소관리", "1A102 방문" } },
                 new ErrorAskItem { Text = "6행 생활지원사명이 비어있음", Field = "생활지원사", Value = "(빈칸)" },
             } },
+            new() { Id = 1, File = "홍길동 제공계획서.xlsx", Worker = "홍길동", CanMerge = true, Errors = new()
+            {
+                new ErrorAskItem { Text = "21행 가나다 33202(보건교육) 계획시간이 18분으로 19분 미만임", Field = "종료시간", Value = "0912~0930",
+                                   Info = "지금 0912~0930 (18분) · 19분이 되려면 0931까지 · 다음 일정: 22행 라마바 0930~1000 → 0931까지 늘리면 1분 겹쳐요",
+                                   Stretch = "뒤 일정 1개를 미루고 1001 뒤 빈 시간에서 맞춤: 21행 가나다 0912~0930 → 0912~0931 / 22행 라마바 0930~1000 → 0931~1001" },
+            } },
         });
         On("conv_log", "검사 중: 홍길동 제공계획서.xlsx");
         On("conv_log", "  [줄 삭제] 9행 가나다 계획시간이 5분으로 10분 미만임");

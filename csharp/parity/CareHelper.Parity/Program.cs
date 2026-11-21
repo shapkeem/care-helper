@@ -58,6 +58,7 @@ if (args[0] == "--fix-test") // 오류 파일 화면에서 칸마다 값을 넣�
                     var cands = new List<string>();
                     if (it.Choices != null) cands.AddRange(it.Choices.Take(30));
                     if (it.Field.Contains("일자")) cands.Insert(0, "20261118");
+                    if (it.Stretch != null) { Console.WriteLine($"  [정보] {it.Info} / [채우기] {it.Stretch}"); cands.Insert(0, Converter.StretchToken); }
                     cands.Add(it.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? "");
                     var ok = cands.FirstOrDefault(c => c.Length > 0 && check(a.Id, e, c) == null);
                     Console.WriteLine($"  {a.Worker} 오류 '{it.Text.Replace("\n", " ")}' → 넣을 값 '{ok}' (선택지 {it.Choices?.Count ?? 0}개)");
