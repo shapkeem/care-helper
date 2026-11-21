@@ -413,10 +413,7 @@ public static class Work
         await page.WaitForTimeoutAsync(100);
         if ((await row.Locator("#from_time").InputValueAsync()).Length == 0)
             throw new WorkError("복사 버튼을 눌렀는데 실적 시간이 채워지지 않았어요.");
-        int m = dlg.Mark();
-        await page.Locator("#DIV_LAYER button:text-is(\"저장\")").First.ClickAsync();
-        if (await dlg.WaitForAsync(m, "정상적으로 처리되었습니다", 90) == null)
-            throw new WorkError("실적 저장 결과를 확인하지 못했어요: " + string.Join(" / ", dlg.Since(m)));
+        await SaveResultLayerAsync(page, dlg);
         return "done";
     }
 
@@ -431,10 +428,47 @@ public static class Work
         var t = Digits(await row.Locator("#to_time").InputValueAsync());
         if (!f.StartsWith(planFrom) || !t.StartsWith(planTo))
             throw new WorkError($"복사 버튼을 눌렀는데 실적 칸이 일정 시간({planFrom}~{planTo})으로 바뀌지 않았어요. 저장하지 않았어요.");
-        int m = dlg.Mark();
-        await page.Locator("#DIV_LAYER button:text-is(\"저장\")").First.ClickAsync();
-        if (await dlg.WaitForAsync(m, "정상적으로 처리되었습니다", 90) == null)
-            throw new WorkError("실적 저장 결과를 확인하지 못했어요: " + string.Join(" / ", dlg.Since(m)));
+        await SaveResultLayerAsync(page, dlg);
+    }
+
+    /// <summary>실적 창의 [저장]을 누르고 '정상적으로 처리되었습니다'를 기다린다.
+    /// 안 오면 알림 내용과 함께 goodeos 서버가 저장 요청에 뭐라고 답했는지도 오류에 남긴다 (원인 찾기용).</summary>
+    static async Task SaveResultLayerAsync(IPage page, Dialogs dlg)
+    {
+        var resps = new List<IResponse>();
+        void OnResp(object? _, IResponse r)
+        {
+            if (r.Request.Method == "POST" && r.Url.Contains("/result/")) lock (resps) resps.Add(r);
+        }
+        page.Response += OnResp;
+        try
+        {
+            int m = dlg.Mark();
+            await page.Locator("#DIV_LAYER button:text-is(\"저장\")").First.ClickAsync();
+            if (await dlg.WaitForAsync(m, "정상적으로 처리되었습니다", 120) != null) return;
+            var parts = new List<string>();
+            List<IResponse> got;
+            lock (resps) got = resps.ToList();
+            foreach (var r in got.Take(3))
+            {
+                string body;
+                try
+                {
+                    body = System.Text.RegularExpressions.Regex.Replace(await r.TextAsync(), @"\s+", " ").Trim();
+                }
+                catch
+                {
+                    body = "";
+                }
+                parts.Add($"{r.Url[(r.Url.LastIndexOf('/') + 1)..]} {r.Status} '{(body.Length > 120 ? body[..120] + "…" : body)}'");
+            }
+            throw new WorkError("실적 저장 결과를 확인하지 못했어요: " + string.Join(" / ", dlg.Since(m)) +
+                                (parts.Count > 0 ? " · 서버 답: " + string.Join(" / ", parts) : " · 서버로 저장 요청이 가지 않았어요"));
+        }
+        finally
+        {
+            page.Response -= OnResp;
+        }
     }
 
     public static async Task<string> DeleteResultAsync(IPage page, Dialogs dlg, string seq, DateOnly d)
