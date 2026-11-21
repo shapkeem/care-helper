@@ -20,6 +20,7 @@ public sealed record ReviewItem(int Pid, string Kind, string File, string Row, s
 public sealed record ConvDoneEv(int Total, int Ok, int Failed, int Deletable, List<string> Warns, string? Error);
 public sealed record UploadDoneEv(int Total, int Ok, List<string> Errors, bool Saved, string? Error);
 public sealed record MsgEv(bool Ok, string Msg);
+public sealed record TodayOneEv(int Id, bool Ok, string Msg);
 public sealed record RowStatusEv(int I, string Status, string Note);
 public sealed record DoneEv(string? Error);
 public sealed record StatusEv(string Kind, string Text, string? Scare);
@@ -40,7 +41,7 @@ public sealed class Api
 
     readonly Action<string, object?> _emit;
     // 기능마다 따로: 카톡 처리 중에도 일일실적 점검 등 다른 기능은 동시에 할 수 있다
-    public readonly Dictionary<string, BusyFlag> B = new[] { "daily", "kakao", "conv", "scare", "chrome", "update", "lists" }
+    public readonly Dictionary<string, BusyFlag> B = new[] { "daily", "kakao", "conv", "scare", "chrome", "update", "lists", "today" }
         .ToDictionary(k => k, _ => new BusyFlag());
     DailyResult? _check;
     readonly HashSet<int> _filled = new(); // 실적을 넣은 사람 번호 (모두 넣기에서 다시 넣지 않게)
@@ -230,6 +231,72 @@ public sealed class Api
     public string? KakaoRun(List<ReviewRow> rows) => Job.Run(rows);
     public void KakaoAnswer(string? value) => Job.Answer(value);
     public void KakaoStop() => Job.Stop();
+
+    // ---- 카톡 요청 화면: 오늘 실적 확인 / 다 실적 넣기
+    List<TodayRow> _today = new();
+    DateOnly _todayDay;
+
+    /// <summary>오늘 지난 일정 중 실적이 없거나 10분 넘게 다른 줄을 찾는다. 끝나면 k_today(List&lt;TodayRow&gt; 또는 오류 글).</summary>
+    public string? TodayScan()
+    {
+        if (B["today"].V) return "오늘 실적을 확인하거나 넣는 중이에요.";
+        B["today"].V = true;
+        Thread(async () =>
+        {
+            void Log(string m) => _emit("k_log", m);
+            try
+            {
+                Log("오늘 실적 확인 중... (지원사마다 조회해요)");
+                await using var pw = await GoodeosChrome.OpenSessionAsync();
+                var page = await GoodeosChrome.GetPageAsync(pw);
+                var now = DateTime.Now + await Work.ServerOffsetAsync(page); // 날짜·시각은 goodeos 서버 기준
+                _todayDay = DateOnly.FromDateTime(now);
+                _today = await TodayResults.ScanAsync(page, _todayDay, now, Log);
+                _emit("k_today", _today);
+            }
+            catch (Exception e)
+            {
+                Log($"[오류] 오늘 실적을 확인하지 못했어요: {e.Message}");
+                _emit("k_today", e.Message);
+            }
+            finally
+            {
+                B["today"].V = false;
+                GoodeosChrome.ScheduleClose();
+            }
+        });
+        return null;
+    }
+
+    /// <summary>고른 줄(ids)에 일정 시간 그대로 실적을 넣는다. 줄마다 k_today_one(TodayOneEv), 끝나면 k_today_done.</summary>
+    public string? TodayFill(List<int> ids)
+    {
+        if (B["today"].V) return "오늘 실적을 확인하거나 넣는 중이에요.";
+        if (B["kakao"].V) return "카톡 요청을 처리하는 중이에요. 끝난 뒤에 눌러 주세요.";
+        var rows = _today.Where(r => ids.Contains(r.Id)).ToList();
+        if (rows.Count == 0) return "넣을 줄이 없어요.";
+        B["today"].V = true;
+        Thread(async () =>
+        {
+            void Log(string m) => _emit("k_log", m);
+            int ok = 0, bad = 0;
+            try
+            {
+                Log($"실적 넣는 중... ({rows.Count}건)");
+                await TodayResultsRunner.FixAllAsync(rows, _todayDay, (id, good, msg) =>
+                {
+                    if (good) Interlocked.Increment(ref ok); else Interlocked.Increment(ref bad);
+                    _emit("k_today_one", new TodayOneEv(id, good, msg));
+                }, Log);
+            }
+            finally
+            {
+                B["today"].V = false;
+                _emit("k_today_done", new MsgEv(bad == 0, $"실적 넣기 끝: 성공 {ok}건" + (bad > 0 ? $", 실패 {bad}건 (줄 옆 이유 확인)" : "")));
+            }
+        });
+        return null;
+    }
 
     // ---- 제공계획서 변환
     public ConvInfo GetConvInfo()

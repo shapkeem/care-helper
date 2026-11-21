@@ -62,6 +62,8 @@
             <DockPanel x:Name="PageKakao" Visibility="Collapsed">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button x:Name="KTodayBtn" Style="{StaticResource Btn}" Content="오늘 실적 확인" Click="KToday_Click" Margin="0,0,6,0"
+                                ToolTip="오늘 이미 끝난 일정 중 실적이 없거나, 실적 시간이 일정과 10분 넘게 다른 것을 찾아요"/>
                         <Button Style="{StaticResource Btn}" Content="멈춤" Click="KStop_Click" Margin="0,0,6,0"/>
                         <Button x:Name="KStartBtn" Style="{StaticResource Btn}" Content="읽기" Click="KStart_Click" Margin="0,0,6,0"/>
                         <Button x:Name="KRunBtn" Style="{StaticResource BtnPrimary}" Content="실행" Click="KRun_Click"/>
@@ -74,6 +76,20 @@
                 <TextBox x:Name="KText" DockPanel.Dock="Top" Height="100" AcceptsReturn="True" TextWrapping="Wrap"
                          VerticalScrollBarVisibility="Auto" Margin="0,2,0,6"/>
                 <TextBlock x:Name="KStatus" DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                <!-- 오늘 실적 확인 결과 -->
+                <Border x:Name="KToday" DockPanel.Dock="Top" BorderBrush="#93C5FD" BorderThickness="2" CornerRadius="12" Padding="10,8" Margin="0,6,0,0" Visibility="Collapsed">
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top">
+                            <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="닫기" Margin="6,0,0,0" Click="KTodayClose_Click"/>
+                            <Button x:Name="KTodayFill" DockPanel.Dock="Right" Style="{StaticResource BtnSmallPrimary}" Content="체크한 줄 다 실적 넣기" Click="KTodayFill_Click"/>
+                            <TextBlock Text="오늘 실적 확인" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="KTodaySub" FontSize="12" Foreground="{StaticResource Muted}" Margin="8,0,0,0" VerticalAlignment="Center" TextWrapping="Wrap"/>
+                        </DockPanel>
+                        <ScrollViewer MaxHeight="220" VerticalScrollBarVisibility="Auto" Margin="0,6,0,0">
+                            <StackPanel x:Name="KTodayList"/>
+                        </ScrollViewer>
+                    </DockPanel>
+                </Border>
                 <Border x:Name="KQ" DockPanel.Dock="Top" Background="#EFF6FF" BorderBrush="#BFDBFE" BorderThickness="1" CornerRadius="12"
                         Padding="14,10" Margin="0,6" Visibility="Collapsed">
                     <StackPanel>

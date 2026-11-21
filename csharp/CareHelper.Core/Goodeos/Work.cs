@@ -420,6 +420,23 @@ public static class Work
         return "done";
     }
 
+    /// <summary>이미 있는 실적을 일정 시간으로 바꾼다: [복사](일정 시간이 실적 칸에 들어감) → [저장]. 지우지 않는다.</summary>
+    public static async Task OverwriteResultAsync(IPage page, Dialogs dlg, string seq, DateOnly d, string planFrom, string planTo)
+    {
+        var row = await ResultRowAsync(page, seq, d);
+        await row.Locator("button:text-is(\"복사\")").ClickAsync();
+        await page.WaitForTimeoutAsync(100);
+        string Digits(string s) => new string(s.Where(char.IsDigit).ToArray());
+        var f = Digits(await row.Locator("#from_time").InputValueAsync());
+        var t = Digits(await row.Locator("#to_time").InputValueAsync());
+        if (!f.StartsWith(planFrom) || !t.StartsWith(planTo))
+            throw new WorkError($"복사 버튼을 눌렀는데 실적 칸이 일정 시간({planFrom}~{planTo})으로 바뀌지 않았어요. 저장하지 않았어요.");
+        int m = dlg.Mark();
+        await page.Locator("#DIV_LAYER button:text-is(\"저장\")").First.ClickAsync();
+        if (await dlg.WaitForAsync(m, "정상적으로 처리되었습니다", 90) == null)
+            throw new WorkError("실적 저장 결과를 확인하지 못했어요: " + string.Join(" / ", dlg.Since(m)));
+    }
+
     public static async Task<string> DeleteResultAsync(IPage page, Dialogs dlg, string seq, DateOnly d)
     {
         var row = await ResultRowAsync(page, seq, d);

@@ -412,6 +412,15 @@ public partial class MainWindow : Window
             case "k_rows":
                 KRows((Kakao.KakaoRows)d!);
                 break;
+            case "k_today":
+                TodayShow(d);
+                break;
+            case "k_today_one":
+                TodayOne((TodayOneEv)d!);
+                break;
+            case "k_today_done":
+                TodayDone((MsgEv)d!);
+                break;
             case "k_log":
                 LogAdd(KLog, (string)d!);
                 break;

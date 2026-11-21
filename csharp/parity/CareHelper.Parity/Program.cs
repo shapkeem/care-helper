@@ -33,6 +33,19 @@ if (args[0] == "--fetch-lists") // '명단 새로 받기'와 같은 동작 (오�
     await GoodeosChrome.CloseAsync();
     return;
 }
+if (args[0] == "--today-scan") // 오늘 실적 확인 (읽기만): [yyyy-MM-dd]
+{
+    var day = args.Length > 1 ? DateOnly.Parse(args[1]) : DateOnly.FromDateTime(DateTime.Today);
+    await using var pw0 = await GoodeosChrome.OpenSessionAsync();
+    var pg = await GoodeosChrome.GetPageAsync(pw0);
+    var t0 = DateTime.Now;
+    var rows0 = await TodayResults.ScanAsync(pg, day, day.ToDateTime(new TimeOnly(23, 59)), m => Console.WriteLine("log: " + m));
+    Console.WriteLine($"sec={(DateTime.Now - t0).TotalSeconds:0.0} rows={rows0.Count}");
+    foreach (var r in rows0.Take(40))
+        Console.WriteLine($"  {r.Ic} | {r.Person} | 일정 {r.PlanText} | 실적 {r.ResText} | {(r.Missing ? "없음" : "다름")} | {r.Svc}");
+    await GoodeosChrome.CloseAsync();
+    return;
+}
 if (args[0] == "--fix-test") // 오류 파일 화면에서 칸마다 값을 넣고 '고른 대로 계속'을 누른 것처럼 돌려 결과를 본다: <local 폴더>
 {
     var loc = args[1];
