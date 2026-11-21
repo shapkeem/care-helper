@@ -161,10 +161,12 @@ public partial class MainWindow
     {
         foreach (var (head, text) in new[] { ("상담일자", "방문일자"), ("상담장소", "일반 유선상담 · 중점 대상자 가정"), ("상담시각", "비우면 9시") })
         {
-            var sp = new StackPanel { Orientation = Orientation.Horizontal };
-            sp.Children.Add(new TextBlock { Text = head, FontSize = 11, FontWeight = FontWeights.Bold, Foreground = Res("Muted") });
-            sp.Children.Add(new TextBlock { Text = text, FontSize = 12, Margin = new Thickness(6, 0, 0, 0) });
-            CsChips.Children.Add(new Border { Background = Res("Card"), CornerRadius = new CornerRadius(10), Padding = new Thickness(12, 8, 12, 8),
+            // 제목·값을 같은 크기로 한 줄 가운데에 맞추고, 칩 높이를 옆 상담자 칸(34)과 같게
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, VerticalAlignment = VerticalAlignment.Center };
+            sp.Children.Add(new TextBlock { Text = head, FontSize = 12, Foreground = Res("Muted"), VerticalAlignment = VerticalAlignment.Center });
+            sp.Children.Add(new Border { Width = 1, Height = 12, Background = Res("Line"), Margin = new Thickness(8, 0, 8, 0), VerticalAlignment = VerticalAlignment.Center });
+            sp.Children.Add(new TextBlock { Text = text, FontSize = 12, FontWeight = FontWeights.SemiBold, VerticalAlignment = VerticalAlignment.Center });
+            CsChips.Children.Add(new Border { Background = Res("Card"), CornerRadius = new CornerRadius(17), Height = 34, Padding = new Thickness(14, 0, 14, 0),
                                               Margin = new Thickness(0, 0, 6, 0), Child = sp });
         }
         CsGrid(CsHdr);
