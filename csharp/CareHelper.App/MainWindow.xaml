@@ -347,5 +347,19 @@
                 <TextBlock x:Name="ToastText" Foreground="White" FontSize="13"/>
             </Border>
         </Grid>
+
+        <!-- 업데이트 중: 화면 전체를 덮어 아무것도 못 누르게 한다 (끝나면 새 버전이 저절로 켜진다) -->
+        <Border x:Name="UpdOverlay" Grid.ColumnSpan="3" Background="#F2F8FAFC" Visibility="Collapsed" Panel.ZIndex="100">
+            <Border Background="White" BorderBrush="{StaticResource Line}" BorderThickness="1" CornerRadius="16" Padding="36,28"
+                    HorizontalAlignment="Center" VerticalAlignment="Center" Width="420">
+                <StackPanel>
+                    <TextBlock x:Name="UpdTitle" Text="새 버전으로 업데이트 중이에요" FontSize="18" FontWeight="Bold" HorizontalAlignment="Center"/>
+                    <TextBlock Text="끝나면 프로그램이 저절로 다시 켜져요. 잠시만 기다려 주세요." FontSize="13" Foreground="{StaticResource Muted}"
+                               HorizontalAlignment="Center" Margin="0,8,0,16" TextWrapping="Wrap" TextAlignment="Center"/>
+                    <ProgressBar x:Name="UpdBar" Height="8" Maximum="100" Foreground="{StaticResource Primary}" Background="{StaticResource Card}" BorderThickness="0"/>
+                    <TextBlock x:Name="UpdPct" Text="받는 중... 0%" FontSize="12" Foreground="{StaticResource Muted}" HorizontalAlignment="Center" Margin="0,8,0,0"/>
+                </StackPanel>
+            </Border>
+        </Border>
     </Grid>
 </Window>

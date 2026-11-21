@@ -855,6 +855,9 @@ public sealed class Api
         }
     }
 
+    /// <summary>켤 때 새 버전이 보이면 묻지 않고 바로 업데이트해도 되는가 (설치 파일을 받을 수 있고, 하던 작업이 없을 때)</summary>
+    public bool CanAutoUpdate => _upd != null && _upd.AssetUrl != null && Updater.CurrentExe != null && !AnyBusy();
+
     /// <summary>→ 화면에 보일 문구 또는 null(업데이트 시작)</summary>
     public string? DoUpdate()
     {

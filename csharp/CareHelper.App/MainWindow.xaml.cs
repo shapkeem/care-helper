@@ -261,6 +261,13 @@ public partial class MainWindow : Window
         {
             t.Stop();
             var root = (FrameworkElement)Content;
+            if (args.Contains("--updlock")) // 시험용: 업데이트 중 화면
+            {
+                UpdLock("v4.0.2(으)로 업데이트 중이에요");
+                UpdBar.Value = 37;
+                UpdPct.Text = "받는 중... 37%";
+                root.UpdateLayout();
+            }
             if (args.Contains("--fixtest")) // 시험용: 오류 파일 칸에 값을 넣고 [수정하기]를 누른 화면
             {
                 foreach (var ((k, n), cf) in _erFields)
@@ -357,11 +364,18 @@ public partial class MainWindow : Window
         if (!Ask("새 버전으로 업데이트할까요? 끝나면 프로그램이 다시 켜져요.")) return;
         var err = _api.DoUpdate();
         if (err != null) Toaster(err);
-        else
-        {
-            UpdBtn.Content = "업데이트 중...";
-            UpdBtn.IsEnabled = false;
-        }
+        else UpdLock("새 버전으로 업데이트 중이에요");
+    }
+
+    /// <summary>업데이트 중에는 화면 전체를 덮어 아무것도 못 하게 한다.</summary>
+    void UpdLock(string title)
+    {
+        UpdBtn.Content = "업데이트 중...";
+        UpdBtn.IsEnabled = false;
+        UpdTitle.Text = title;
+        UpdBar.Value = 0;
+        UpdPct.Text = "받는 중... 0%";
+        UpdOverlay.Visibility = Visibility.Visible;
     }
 
     // ---------------------------------------------------------------- 끌어다 놓기
@@ -499,13 +513,19 @@ public partial class MainWindow : Window
             case "update":
                 UpdBtn.Content = $"v{d} 업데이트";
                 UpdBtn.Visibility = Visibility.Visible;
+                // 켤 때 새 버전이 있으면 누르지 않아도 바로 업데이트한다 (시험 화면(--dump)에서는 안 함)
+                if (!Environment.GetCommandLineArgs().Contains("--dump") && _api.CanAutoUpdate && _api.DoUpdate() == null)
+                    UpdLock($"v{d}(으)로 업데이트 중이에요");
                 break;
             case "update_progress":
                 UpdBtn.Content = $"업데이트 중... {d}%";
+                UpdBar.Value = (int)d!;
+                UpdPct.Text = (int)d! >= 100 ? "설치하는 중..." : $"받는 중... {d}%";
                 break;
             case "update_failed":
                 UpdBtn.IsEnabled = true;
                 UpdBtn.Content = "업데이트";
+                UpdOverlay.Visibility = Visibility.Collapsed; // 실패하면 지금 버전을 그대로 쓰게 풀어 준다
                 Toaster((string)d!);
                 break;
             case "exit":

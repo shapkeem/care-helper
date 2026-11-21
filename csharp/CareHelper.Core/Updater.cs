@@ -13,11 +13,13 @@ public sealed record ReleaseInfo(string Version, string? AssetUrl, long AssetSiz
 public static class Updater
 {
     public const string ExeName = "맞춤돌봄도우미.exe";
-    static readonly HttpClient Http = CreateHttp();
+    static readonly HttpClient Http = CreateHttp(TimeSpan.FromSeconds(60));
+    // 큰 파일 받기용: 전체 시간 제한 없음 (느린 회선에서 60초 만에 끊기던 문제). 멈춤은 DownloadAsync 가 30초씩 본다
+    static readonly HttpClient DownloadHttp = CreateHttp(Timeout.InfiniteTimeSpan);
 
-    static HttpClient CreateHttp()
+    static HttpClient CreateHttp(TimeSpan timeout)
     {
-        var h = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true }) { Timeout = TimeSpan.FromSeconds(60) };
+        var h = new HttpClient(new HttpClientHandler { AllowAutoRedirect = true }) { Timeout = timeout };
         h.DefaultRequestHeaders.UserAgent.ParseAdd($"care-helper/{AppInfo.AppVersion}");
         return h;
     }
@@ -106,28 +108,53 @@ public static class Updater
         _ => "알 수 없는 문제로 업데이트하지 못했습니다. 잠시 후 다시 눌러주세요.",
     };
 
+    /// <summary>큰 파일 받기. 30초 동안 한 바이트도 안 오면(중간에 멈춤) 끊고, 받은 데서부터 이어 받기를 다시 한다 (최대 5번).
+    /// 예전에는 멈추면 끝없이 기다려서 업데이트가 '업데이트 중...'에서 멈췄다. → 받은 바이트 수</summary>
+    static async Task<long> DownloadAsync(string url, string path, long expected, Action<int>? onProgress, int stallSec = 30, int tries = 6)
+    {
+        long done = 0;
+        if (File.Exists(path)) File.Delete(path);
+        for (int attempt = 1; ; attempt++)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                if (done > 0) req.Headers.Range = new System.Net.Http.Headers.RangeHeaderValue(done, null);
+                using var headCts = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var resp = await DownloadHttp.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, headCts.Token);
+                resp.EnsureSuccessStatusCode();
+                if (done > 0 && resp.StatusCode != HttpStatusCode.PartialContent)
+                    done = 0; // 이어 받기를 안 받아 주면 처음부터
+                long total = expected > 0 ? expected : (resp.Content.Headers.ContentLength ?? 0) + done;
+                await using var src = await resp.Content.ReadAsStreamAsync();
+                await using var dst = new FileStream(path, done > 0 ? FileMode.Append : FileMode.Create, FileAccess.Write);
+                var buf = new byte[256 * 1024];
+                while (true)
+                {
+                    using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(stallSec));
+                    int n = await src.ReadAsync(buf, cts.Token);
+                    if (n == 0) break;
+                    await dst.WriteAsync(buf.AsMemory(0, n));
+                    done += n;
+                    if (onProgress != null && total > 0) onProgress((int)Math.Min(100, done * 100 / total));
+                }
+                if (expected <= 0 || done >= expected) return done;
+                throw new IOException("받는 중에 연결이 끊겼어요.");
+            }
+            catch (Exception e) when (attempt < tries && e is IOException or HttpRequestException or OperationCanceledException)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(Math.Min(10, attempt * 2)));
+            }
+        }
+    }
+
     /// <summary>새 버전 zip 을 받아 풀고, 바로가기를 바꾸고, 새 버전을 켠다. 부른 쪽은 그 뒤 프로그램을 끈다.</summary>
     public static async Task InstallAsync(ReleaseInfo info, Action<int>? onProgress = null)
     {
         if (info.AssetUrl == null) throw new InvalidOperationException("새 버전 파일이 없어요.");
         Directory.CreateDirectory(AppsDir);
         var zipPath = Path.Combine(AppsDir, $"{info.Version}.zip.part");
-        long done = 0;
-        using (var resp = await Http.GetAsync(info.AssetUrl, HttpCompletionOption.ResponseHeadersRead))
-        {
-            resp.EnsureSuccessStatusCode();
-            long total = info.AssetSize > 0 ? info.AssetSize : resp.Content.Headers.ContentLength ?? 0;
-            await using var src = await resp.Content.ReadAsStreamAsync();
-            await using var dst = File.Create(zipPath);
-            var buf = new byte[256 * 1024];
-            int n;
-            while ((n = await src.ReadAsync(buf)) > 0)
-            {
-                await dst.WriteAsync(buf.AsMemory(0, n));
-                done += n;
-                if (onProgress != null && total > 0) onProgress((int)Math.Min(100, done * 100 / total));
-            }
-        }
+        long done = await DownloadAsync(info.AssetUrl, zipPath, info.AssetSize, onProgress);
         if (info.AssetSize > 0 && done != info.AssetSize)
         {
             File.Delete(zipPath);
