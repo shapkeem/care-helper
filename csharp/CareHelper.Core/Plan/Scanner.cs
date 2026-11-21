@@ -379,17 +379,19 @@ public static class Scanner
                 if (s2 >= e1) continue;
                 int rlabel1 = rowNums[i1], rlabel2 = rowNums[i2];
                 var dateDisp = $"{d % 10000 / 100}월{d % 100}일";
+                // 고칠 때는 일정 사이를 꼭 1분 띄운다 (끝 0911 → 다음 시작 0912)
                 if (e2 >= e1)
                 {
-                    job.Proposals.Add(new FixProposal("시간겹침", label, rlabel1, name, MinutesToTime(e1), MinutesToTime(s2),
-                        $"{dateDisp} {MinutesToTime(s1)}~{MinutesToTime(e1)}와 {MinutesToTime(s2)}~{MinutesToTime(e2)}({rlabel2}행)이 겹쳐 종료시간을 당김",
+                    int newE1 = Math.Max(s1 + 1, s2 - 1);
+                    job.Proposals.Add(new FixProposal("시간겹침", label, rlabel1, name, MinutesToTime(e1), MinutesToTime(newE1),
+                        $"{dateDisp} {MinutesToTime(s1)}~{MinutesToTime(e1)}와 {MinutesToTime(s2)}~{MinutesToTime(e2)}({rlabel2}행)이 겹쳐 종료시간을 당김 (1분 띄움)",
                         new() { (i1, ColEnd) }, SingleTimeBuilder));
-                    events[k] = (s1, s2, i1);
+                    events[k] = (s1, newE1, i1);
                 }
                 else
                 {
                     int dur = e2 - s2;
-                    int newS = e1, newE = e1 + dur;
+                    int newS = e1 + 1, newE = newS + dur;
                     job.Proposals.Add(new FixProposal("시간겹침", label, rlabel2, name,
                         $"{MinutesToTime(s2)}~{MinutesToTime(e2)}", $"{MinutesToTime(newS)}~{MinutesToTime(newE)}",
                         $"{dateDisp} 일정이 {MinutesToTime(s1)}~{MinutesToTime(e1)}({rlabel1}행) 안에 완전히 포함되어 뒤로 이동",

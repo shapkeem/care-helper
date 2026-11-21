@@ -453,6 +453,9 @@ public static class Converter
 
     static string Hm(int m) => $"{m / 60:00}{m % 60:00}";
 
+    /// <summary>일정 사이에 꼭 남기는 간격(분)</summary>
+    const int Gap = 1;
+
     /// <summary>이 서비스의 최소 계획시간(분). 전화는 0.</summary>
     static int NeedMinutes(object?[] row)
     {
@@ -495,18 +498,20 @@ public static class Converter
         int lack = need - (E - S);
         if (lack <= 0 || E < S) return null;
         var others = SameDay(job, i);
-        // ① 앞 빈 시간 (앞 일정이 없으면 그만큼 일찍 시작해도 된다)
+        // 일정 사이는 꼭 1분 띄운다 (끝 0911 → 다음 시작 0912)
+        // ① 앞 빈 시간 (앞 일정 끝 + 1분까지만 당긴다. 앞 일정이 없으면 그만큼 일찍 시작해도 된다)
         var before = others.Where(o => o.S < S).ToList();
-        int floor = before.Count > 0 ? before.Max(o => o.E) : Math.Max(0, S - lack);
+        int floor = before.Count > 0 ? before.Max(o => o.E) + Gap : Math.Max(0, S - lack);
         int take = Math.Min(lack, Math.Max(0, S - floor));
         int newS = S - take, rest = lack - take, newE = E + rest;
         var moves = new List<(int Row, int S, int E)> { (i, newS, newE) };
-        // ② 뒤 일정 미루기 (빈 시간에서 멈춤)
+        // ② 뒤 일정 미루기 (앞 일정 끝 + 1분 뒤에 시작하게. 1분 넘게 빈 시간이 나오면 거기서 멈춤)
         int cur = newE;
-        foreach (var o in others.Where(o => o.S >= S).OrderBy(o => o.S).ThenBy(o => o.E))
+        foreach (var o in rest == 0 ? Enumerable.Empty<(int Row, int S, int E)>() // 끝을 안 늘렸으면 뒤 일정은 건드리지 않는다
+                                    : others.Where(o => o.S >= S).OrderBy(o => o.S).ThenBy(o => o.E))
         {
-            if (o.S >= cur) break;
-            int shift = cur - o.S;
+            if (o.S >= cur + Gap) break;
+            int shift = cur + Gap - o.S;
             moves.Add((o.Row, o.S + shift, o.E + shift));
             cur = o.E + shift;
         }
@@ -542,7 +547,8 @@ public static class Converter
         {
             var t = $"다음 일정: {job.RowNums[next.Row]}행 {NormStr(job.Grid[next.Row][ColName])} {Hm(next.S)}~{Hm(next.E)}";
             if (want > next.S) t += $" → {Hm(want)}까지 늘리면 {want - next.S}분 겹쳐요";
-            else t += " (늘려도 안 겹쳐요)";
+            else if (want + Gap > next.S) t += $" → {Hm(want)}까지 늘리면 1분 간격이 안 남아요";
+            else t += " (늘려도 1분 이상 띄워져요)";
             parts.Add(t);
         }
         return string.Join(" · ", parts);

@@ -197,14 +197,24 @@ public class PlanTests
     [Fact]
     public void StretchUsesGapBefore()
     {
-        var job = Job(new() { TRow("0900", "0910", "가"), TRow("0912", "0930", "나", "33202"), TRow("0930", "1000", "다") });
+        // 앞 일정이 0910에 끝나면 0911까지 당길 수 있다 (0910 끝 → 0911 시작, 1분 간격)
+        var job = Job(new() { TRow("0900", "0910", "가"), TRow("0912", "0930", "나", "33202"), TRow("0931", "1000", "다") });
         var plan = Converter.PlanStretch(job, 1)!;
         Assert.Equal(new[] { (1, 9 * 60 + 11, 9 * 60 + 30) }, plan.Moves);
         Assert.Contains("앞 빈 시간 1분", plan.Desc);
         var info = Converter.TimeInfo(job, 1)!;
         Assert.Contains("지금 0912~0930 (18분)", info);
         Assert.Contains("19분이 되려면 0931까지", info);
-        Assert.Contains("1분 겹쳐요", info);
+        Assert.Contains("1분 간격이 안 남아요", info);
+    }
+
+    /// <summary>앞 일정이 0911에 끝나면 0912 시작은 그대로 (앞으로 당기면 1분 간격이 없어진다) → 끝을 늘린다.</summary>
+    [Fact]
+    public void StretchKeepsOneMinuteGapBefore()
+    {
+        var job = Job(new() { TRow("0900", "0911", "가"), TRow("0912", "0930", "나", "33202"), TRow("0940", "0950", "다") });
+        var plan = Converter.PlanStretch(job, 1)!;
+        Assert.Equal(new[] { (1, 9 * 60 + 12, 9 * 60 + 31) }, plan.Moves);
     }
 
     /// <summary>앞이 꽉 차 있으면 끝을 늘리고, 겹치는 뒤 일정만 미루다가 빈 시간에서 멈춘다.</summary>
@@ -213,19 +223,20 @@ public class PlanTests
     {
         var job = Job(new()
         {
-            TRow("0900", "0912", "가"), TRow("0912", "0930", "나", "33202"), TRow("0930", "1000", "다"),
-            TRow("1000", "1010", "라"), TRow("1012", "1030", "마"), TRow("1030", "1100", "바"),
+            TRow("0900", "0911", "가"), TRow("0912", "0930", "나", "33202"), TRow("0931", "1000", "다"),
+            TRow("1001", "1010", "라"), TRow("1013", "1030", "마"), TRow("1031", "1100", "바"),
         });
         var plan = Converter.PlanStretch(job, 1)!;
-        Assert.Equal(new[] { (1, 552, 571), (2, 571, 601), (3, 601, 611) }, plan.Moves); // 0912~0931, 0931~1001, 1001~1011 → 1012 앞 빈 시간에서 멈춤
+        // 0912~0931, 0932~1001, 1002~1011 → 1013 앞에 1분 넘게 비어 있어 거기서 멈춤 (모두 1분 간격)
+        Assert.Equal(new[] { (1, 552, 571), (2, 572, 601), (3, 602, 611) }, plan.Moves);
         // '빈 시간으로 채우기'로 고치면 세 줄이 바뀌고 오류가 없어진다
         job.Error(1, ColEnd, "3행 나 33202(보건교육) 계획시간이 18분으로 19분 미만임");
         Assert.Null(Converter.CheckFix(job, 1, ColEnd, Converter.StretchToken).Problem);
         RunAsk(new() { job }, (_, _) => Ans((0, "separate", new() { [0] = Converter.StretchToken })));
         Assert.Empty(job.Errors);
         Assert.Equal(new object?[] { "0912", "0931" }, new[] { job.Grid[1][ColStart], job.Grid[1][ColEnd] });
-        Assert.Equal(new object?[] { "1001", "1011" }, new[] { job.Grid[3][ColStart], job.Grid[3][ColEnd] });
-        Assert.Equal("1012", job.Grid[4][ColStart]); // 빈 시간 뒤 일정은 그대로
+        Assert.Equal(new object?[] { "1002", "1011" }, new[] { job.Grid[3][ColStart], job.Grid[3][ColEnd] });
+        Assert.Equal("1013", job.Grid[4][ColStart]); // 빈 시간 뒤 일정은 그대로
     }
 
     static FileJob ScanRows(DateOnly today, params long[] dates)
