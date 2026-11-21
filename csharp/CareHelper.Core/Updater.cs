@@ -153,7 +153,7 @@ public static class Updater
     {
         if (info.AssetUrl == null) throw new InvalidOperationException("새 버전 파일이 없어요.");
         Directory.CreateDirectory(AppsDir);
-        var zipPath = Path.Combine(AppsDir, $"{info.Version}.zip.part");
+        var zipPath = Path.Combine(AppsDir, $"{info.Version}.{Environment.ProcessId}.zip.part"); // 연결 exe 가 같은 버전을 받는 중이어도 겹치지 않게
         long done = await DownloadAsync(info.AssetUrl, zipPath, info.AssetSize, onProgress);
         if (info.AssetSize > 0 && done != info.AssetSize)
         {
@@ -255,6 +255,10 @@ public static class Updater
         var me = CurrentExe;
         if (me == null || !Directory.Exists(AppsDir)) return;
         var mine = Path.GetFullPath(Path.GetDirectoryName(me)!).TrimEnd('\\');
+        // 설치 폴더(app\버전) 밖에서 켠 프로그램(압축 푼 폴더·시험판)은 아무것도 지우지 않는다.
+        // 예전에는 밖에서 켜도 app 아래 버전 폴더를 모두 지워서, 바탕화면 아이콘이 처음 설치부터 다시 했다.
+        var apps = Path.GetFullPath(AppsDir).TrimEnd('\\');
+        if (!mine.StartsWith(apps + "\\", StringComparison.OrdinalIgnoreCase)) return;
         foreach (var d in Directory.EnumerateDirectories(AppsDir))
         {
             var full = Path.GetFullPath(d).TrimEnd('\\');
