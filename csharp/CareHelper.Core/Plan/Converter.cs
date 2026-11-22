@@ -26,6 +26,9 @@ public sealed class ErrorAskItem
     public List<string>? Choices;
     public string? Info;     // 종료시간 오류: 지금 시간대·몇 시까지·다음 일정과 겹침
     public string? Stretch;  // '빈 시간으로 채우기'로 바뀌는 내용 (못 하면 null)
+    public string? Fit;      // 겹치는 일정: '빈 시간에 맞추기'로 넣을 값 (예: 1131~1139). 못 하면 null
+    public List<string>? Slots; // 그 날 빈 시간들 또는 긴 전화의 추천 시간 (누르면 그 시간을 넣는다)
+    public string SlotTitle = "그 날 빈 시간";
 }
 
 /// <summary>화면의 답: 합칠지(merge) 따로 뺄지(separate), 오류 번호 → 고친 값.</summary>
@@ -482,6 +485,139 @@ public static class Converter
         return list;
     }
 
+    /// <summary>같은 지원사의 같은 날 다른 줄들 (줄, 시작분, 끝분)</summary>
+    static List<(int Row, int S, int E)> SameWorkerDay(FileJob job, int i)
+    {
+        var w = NormStr(job.Grid[i][ColWorker]);
+        return SameDay(job, i).Where(o => NormStr(job.Grid[o.Row][ColWorker]) == w).ToList();
+    }
+
+    /// <summary>그 날 비어 있는 시간 (앞뒤 일정과 1분씩 띄운 것): "빈 시간: 1131~1139, 1329~1409, 1431 이후"</summary>
+    public static string FreeSlots(FileJob job, int i)
+    {
+        var busy = SameWorkerDay(job, i).OrderBy(o => o.S).ToList();
+        if (busy.Count == 0) return "그 날 다른 일정이 없어요.";
+        var merged = new List<(int S, int E)>();
+        foreach (var (_, s, e) in busy)
+            if (merged.Count > 0 && s <= merged[^1].E) merged[^1] = (merged[^1].S, Math.Max(merged[^1].E, e));
+            else merged.Add((s, e));
+        var free = new List<string>();
+        if (merged[0].S - Gap - 9 * 60 >= 1) free.Add($"{Hm(merged[0].S - Gap)}까지");
+        for (int k = 0; k + 1 < merged.Count; k++)
+        {
+            int a = merged[k].E + Gap, b = merged[k + 1].S - Gap;
+            if (b > a) free.Add($"{Hm(a)}~{Hm(b)}");
+        }
+        free.Add($"{Hm(merged[^1].E + Gap)} 이후");
+        return "그 날 빈 시간: " + string.Join(", ", free);
+    }
+
+    /// <summary>계획시간 오류의 참고 글: 겹치는 일정들 (겹치지 않으면 긴 전화 안내). 빈 시간은 버튼으로 따로 보여 준다.</summary>
+    public static string RangeInfo(FileJob job, int i)
+    {
+        var row = job.Grid[i];
+        var s0 = NormalizeTime(row[ColStart]);
+        var e0 = NormalizeTime(row[ColEnd]);
+        if (s0 == null || e0 == null) return FreeSlots(job, i);
+        int S = TimeToMinutes(s0), E = TimeToMinutes(e0);
+        var hits = SameWorkerDay(job, i).Where(o => S < o.E && o.S < E).OrderBy(o => o.S)
+            .Select(o => $"{NormStr(job.Grid[o.Row][ColName])} {Hm(o.S)}~{Hm(o.E)}").ToList();
+        if (hits.Count > 0)
+            return "겹치는 일정: " + string.Join(", ", hits.Take(6)) + (hits.Count > 6 ? $" 외 {hits.Count - 6}개" : "");
+        return $"전화는 보통 {MaxPhoneMinutes}분 안쪽이에요. 추천 시간을 누르거나 맞는 시간을 넣어 주세요 (정말 맞으면 같은 시간을 그대로)";
+    }
+
+    /// <summary>그 날 이 줄을 넣을 수 있는 빈 시간들 (앞뒤 일정과 1분씩 띄움, 서비스 최소 시간 이상). 마지막 일정 뒤는 끝을 밤 12시 전으로.</summary>
+    public static List<(int A, int B)> FreeSlotList(FileJob job, int i)
+    {
+        var busy = SameWorkerDay(job, i).OrderBy(o => o.S).ToList();
+        var res = new List<(int, int)>();
+        if (busy.Count == 0) return res;
+        var merged = new List<(int S, int E)>();
+        foreach (var (_, s, e) in busy)
+            if (merged.Count > 0 && s <= merged[^1].E) merged[^1] = (merged[^1].S, Math.Max(merged[^1].E, e));
+            else merged.Add((s, e));
+        int need = Math.Max(1, NeedMinutes(job.Grid[i]));
+        void Add(int a, int b) { if (b - a >= need) res.Add((a, b)); }
+        Add(9 * 60, merged[0].S - Gap);
+        for (int k = 0; k + 1 < merged.Count; k++) Add(merged[k].E + Gap, merged[k + 1].S - Gap);
+        Add(merged[^1].E + Gap, 24 * 60 - 1);
+        return res;
+    }
+
+    /// <summary>겹치는 줄을 원래 시작 시간에서 가장 가까운 빈 시간에 넣은 값 (예: 1129~1330 → 1131~1139). 겹치지 않거나 넣을 곳이 없으면 null.</summary>
+    public static string? FitSlot(FileJob job, int i)
+    {
+        var row = job.Grid[i];
+        var s0 = NormalizeTime(row[ColStart]);
+        var e0 = NormalizeTime(row[ColEnd]);
+        if (s0 == null || e0 == null) return null;
+        int S = TimeToMinutes(s0), E = TimeToMinutes(e0), dur = Math.Max(1, E - S);
+        if (!Overlaps(job, i))
+            return PhoneGuesses(job, i).FirstOrDefault(); // 겹치지 않는 긴 전화: 다른 전화 길이로 줄인 시간
+        int need = Math.Max(1, NeedMinutes(row));
+        var slots = FreeSlotList(job, i);
+        if (slots.Count == 0) return null;
+        var (a, b) = slots.OrderBy(x => S >= x.A && S <= x.B ? 0 : Math.Min(Math.Abs(x.A - S), Math.Abs(x.B - S))).First();
+        int ns, ne;
+        if (S > b) { ne = b; ns = Math.Max(a, b - dur); }
+        else
+        {
+            ns = Math.Max(a, S);
+            if (ns + need > b) ns = Math.Max(a, b - need);
+            ne = Math.Min(b, ns + dur);
+        }
+        if (ne - ns < need) return null;
+        return $"{Hm(ns)}~{Hm(ne)}";
+    }
+
+    /// <summary>같은 지원사의 같은 날 다른 일정과 겹치거나 1분 간격이 안 남는지</summary>
+    public static bool Overlaps(FileJob job, int i)
+    {
+        var s0 = NormalizeTime(job.Grid[i][ColStart]);
+        var e0 = NormalizeTime(job.Grid[i][ColEnd]);
+        if (s0 == null || e0 == null) return false;
+        int S = TimeToMinutes(s0), E = TimeToMinutes(e0);
+        return SameWorkerDay(job, i).Any(o => S < o.E + Gap && o.S < E + Gap);
+    }
+
+    /// <summary>너무 긴 전화(겹치지 않음)의 추천 시간: 이 파일의 다른 전화들이 흔히 쓰는 길이로,
+    /// ① 시작을 그대로 두거나 ② 끝을 그대로 둔다 (1129~1230 → 1129~1130, 1229~1230). 다른 일정과 1분씩 띄운 것만.</summary>
+    public static List<string> PhoneGuesses(FileJob job, int i)
+    {
+        var res = new List<string>();
+        var row = job.Grid[i];
+        if (!PhoneCodes.Contains(CleanServiceCode(row[ColCode]))) return res;
+        var s0 = NormalizeTime(row[ColStart]);
+        var e0 = NormalizeTime(row[ColEnd]);
+        if (s0 == null || e0 == null) return res;
+        int S = TimeToMinutes(s0), E = TimeToMinutes(e0);
+        if (E - S <= MaxPhoneMinutes) return res;
+        var w = NormStr(row[ColWorker]);
+        var durs = new List<int>();
+        for (int j = 0; j < job.Grid.Count; j++)
+        {
+            if (j == i || job.DroppedRows.ContainsKey(j)) continue;
+            var r = job.Grid[j];
+            if (NormStr(r[ColWorker]) != w || !PhoneCodes.Contains(CleanServiceCode(r[ColCode]))) continue;
+            var a = NormalizeTime(r[ColStart]);
+            var b = NormalizeTime(r[ColEnd]);
+            if (a == null || b == null) continue;
+            int d = TimeToMinutes(b) - TimeToMinutes(a);
+            if (d >= 1 && d <= MaxPhoneMinutes) durs.Add(d);
+        }
+        // 가장 많이 쓴 길이 (같으면 짧은 쪽). 다른 전화가 없으면 5분
+        int t = durs.Count == 0 ? 5 : durs.GroupBy(x => x).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).First().Key;
+        var others = SameWorkerDay(job, i);
+        foreach (var (a, b) in new[] { (S, S + t), (E - t, E) })
+        {
+            if (a < 0 || b >= 24 * 60 || others.Any(o => a < o.E + Gap && o.S < b + Gap)) continue;
+            var v = $"{Hm(a)}~{Hm(b)}";
+            if (!res.Contains(v)) res.Add(v);
+        }
+        return res;
+    }
+
     public sealed record StretchPlan(List<(int Row, int S, int E)> Moves, string Desc);
 
     /// <summary>계획시간이 모자란 줄을 빈 시간으로 채우는 방법:
@@ -625,6 +761,22 @@ public static class Converter
                 return ($"시작({s})부터 {need}분 이상이어야 해요.", none, null);
             return (null, new() { [ColEnd] = t }, null);
         }
+        if (col == ColStart) // 계획시간(시작~끝)을 통째로 고친다: 같은 날 다른 일정과 1분 이상 띄워야 한다
+        {
+            var parts = System.Text.RegularExpressions.Regex.Split(text.Replace(" ", ""), "[~\\-]");
+            var s = parts.Length == 2 ? NormalizeTime(parts[0]) : null;
+            var e = parts.Length == 2 ? NormalizeTime(parts[1]) : null;
+            if (s == null || e == null) return ("시간은 1131~1139처럼 시작~끝으로 넣어 주세요.", none, null);
+            int S = TimeToMinutes(s), E = TimeToMinutes(e);
+            if (E <= S) return ("끝 시간이 시작보다 늦어야 해요.", none, null);
+            int need = NeedMinutes(row);
+            if (E - S < need) return ($"이 서비스는 {need}분 이상이어야 해요.", none, null);
+            var clash = SameWorkerDay(job, i).Where(o => S < o.E + Gap && o.S < E + Gap).OrderBy(o => o.S).FirstOrDefault();
+            if (clash != default)
+                return ($"{job.RowNums[clash.Row]}행 {NormStr(job.Grid[clash.Row][ColName])} {Hm(clash.S)}~{Hm(clash.E)}와 겹치거나 1분 간격이 안 남아요. " +
+                        FreeSlots(job, i), none, null);
+            return (null, new() { [ColStart] = s, [ColEnd] = e }, null);
+        }
         if (col == ColWorker)
         {
             if (job.WorkerData is { Count: > 0 } && !job.WorkerData.ContainsKey(first))
@@ -651,11 +803,13 @@ public static class Converter
         }
         if (entry != null) job.RowEntries[i] = entry;
         var old = DisplayValue(job.Grid[i][col]);
+        if (col == ColStart) old = $"{old}~{DisplayValue(job.Grid[i][ColEnd])}";
         foreach (var (c, v) in values) job.Grid[i][c] = v;
         // 같은 칸을 바꾸는 수정 제안이 뒤에서 덮어쓰지 않게
         job.Proposals = job.Proposals.Where(p => !values.Keys.Any(c => p.Cells.Contains((i, c)))).ToList();
         job.Errors.Remove(msg);
-        log($"[수정] {job.WorkerName} {job.RowNums[i]}행 {FixFields[col]} '{old}' → '{Py.Str(values[col])}'");
+        var shown = col == ColStart ? $"{values[ColStart]}~{values[ColEnd]}" : Py.Str(values[col]);
+        log($"[수정] {job.WorkerName} {job.RowNums[i]}행 {FixFields[col]} '{old}' → '{shown}'");
         return true;
     }
 
@@ -676,15 +830,21 @@ public static class Converter
                 bool has = j.ErrorCells.TryGetValue(m, out var cell);
                 bool fixable = has && FixFields.ContainsKey(cell.Col);
                 bool endCol = fixable && cell.Col == ColEnd;
-                var st = endCol ? NormalizeTime(j.Grid[cell.Row][ColStart]) : null;
+                bool rangeCol = fixable && cell.Col == ColStart;
+                var st = endCol || rangeCol ? NormalizeTime(j.Grid[cell.Row][ColStart]) : null;
                 ask.Errors.Add(new ErrorAskItem
                 {
                     Text = m, Field = fixable ? FixFields[cell.Col] : null,
                     // 종료시간은 시작~끝으로 보여 준다 (끝만 보면 언제부터인지 모름)
-                    Value = !fixable ? "" : endCol && st != null ? $"{st}~{DisplayValue(j.Grid[cell.Row][ColEnd])}" : DisplayValue(j.Grid[cell.Row][cell.Col]),
+                    Value = !fixable ? "" : (endCol || rangeCol) && st != null ? $"{st}~{DisplayValue(j.Grid[cell.Row][ColEnd])}" : DisplayValue(j.Grid[cell.Row][cell.Col]),
                     Choices = fixable ? FixChoices(j, cell.Col) : null,
-                    Info = endCol ? TimeInfo(j, cell.Row) : null,
+                    Info = endCol ? TimeInfo(j, cell.Row) : rangeCol ? RangeInfo(j, cell.Row) : null,
                     Stretch = endCol ? PlanStretch(j, cell.Row)?.Desc : null,
+                    Fit = rangeCol ? FitSlot(j, cell.Row) : null,
+                    // 겹치는 줄은 그 날 빈 시간, 겹치지 않는 긴 전화는 추천 시간
+                    Slots = !rangeCol ? null : !Overlaps(j, cell.Row) && PhoneGuesses(j, cell.Row) is { Count: > 0 } pg ? pg
+                        : FreeSlotList(j, cell.Row).Where(x => x.B < 24 * 60 - 1).Select(x => $"{Hm(x.A)}~{Hm(x.B)}").ToList(),
+                    SlotTitle = rangeCol && !Overlaps(j, cell.Row) && PhoneGuesses(j, cell.Row).Count > 0 ? "추천 시간" : "그 날 빈 시간",
                 });
             }
             asks.Add(ask);

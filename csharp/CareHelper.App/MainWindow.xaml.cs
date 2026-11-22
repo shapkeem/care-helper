@@ -261,6 +261,11 @@ public partial class MainWindow : Window
         {
             t.Stop();
             var root = (FrameworkElement)Content;
+            if (args.Contains("--erscroll") && ErList.Parent is System.Windows.Controls.ScrollViewer esv) // 시험용: 오류 목록 맨 아래
+            {
+                esv.ScrollToEnd();
+                root.UpdateLayout();
+            }
             if (args.Contains("--updlock")) // 시험용: 업데이트 중 화면
             {
                 UpdLock("v4.0.2(으)로 업데이트 중이에요");

@@ -384,4 +384,77 @@ public class PlanTests
         Assert.Equal("12.5", PlanValues.DisplayValue(12.5));
         Assert.Equal("'19101'", Scanner.PyRepr("19101"));
     }
+
+    static FileJob ScanGrid(params object?[][] rows)
+    {
+        var ws = new Sheet();
+        int c = 1;
+        foreach (var h in StandardHeaders) ws.Set(1, c++, h);
+        for (int r = 0; r < rows.Length; r++)
+            for (int k = 0; k < rows[r].Length; k++)
+                if (rows[r][k] != null) ws.Set(r + 2, k + 1, rows[r][k]);
+        var job = new FileJob("홍길동 1123~1127제공계획서.xlsx");
+        Scanner.ScanFile(job, ws, null, _ => { }, null, null, new DateOnly(2026, 11, 22));
+        return job;
+    }
+
+    /// <summary>같은 지원사의 다른 어르신 일정이 겹치면(1329~1330 을 1129~1330 으로 씀) 가장 많이 겹치는 줄 하나만 오류로 묻고,
+    /// 그 날 빈 시간을 보여 주며, 빈 시간에 맞게 넣은 값만 받는다.</summary>
+    [Fact]
+    public void WorkerOverlapFlagsTheTypoRow()
+    {
+        var job = ScanGrid(
+            TRow("0931", "1130", "가가", "43202", 20261125), TRow("1140", "1200", "나나", "1A102", 20261125),
+            TRow("1315", "1316", "다다", "19101", 20261125), TRow("1327", "1328", "라라", "19101", 20261125),
+            TRow("1129", "1330", "마마", "19101", 20261125), TRow("1410", "1420", "바바", "1A102", 20261125));
+        var err = Assert.Single(job.Errors);
+        Assert.StartsWith("6행 마마 · 11월 25일 1129~1330", err);
+        Assert.Contains("4개와", err);
+        Assert.StartsWith("겹치는 일정: 가가 0931~1130, 나나 1140~1200", Converter.RangeInfo(job, job.ErrorCells[err].Row));
+        var (i, col) = job.ErrorCells[err];
+        Assert.Equal(ColStart, col);
+        Assert.Equal("그 날 빈 시간: 0930까지, 1131~1139, 1201~1314, 1317~1326, 1329~1409, 1421 이후", Converter.FreeSlots(job, i));
+        Assert.Equal("1131~1139", Converter.FitSlot(job, i)); // [빈 시간에 맞추기]: 원래 시작(1129)에서 가장 가까운 빈 시간
+        Assert.Equal(new[] { (540, 570), (691, 699), (721, 794), (797, 806), (809, 849), (861, 1439) }, Converter.FreeSlotList(job, i));
+        Assert.Null(Converter.CheckFix(job, i, ColStart, "1131~1139").Problem);
+        Assert.Null(Converter.CheckFix(job, i, ColStart, "1329-1330").Problem);
+        Assert.NotNull(Converter.CheckFix(job, i, ColStart, "1129~1130").Problem); // 가가 1130 과 1분 간격이 안 남음
+        Assert.NotNull(Converter.CheckFix(job, i, ColStart, "1131").Problem);
+        RunAsk(new() { job }, (_, _) => Ans((0, "separate", new() { [0] = "1131~1139" })));
+        Assert.Empty(job.Errors);
+        Assert.Equal(new object?[] { "1131", "1139" }, new[] { job.Grid[i][ColStart], job.Grid[i][ColEnd] });
+    }
+
+    /// <summary>두 일정만 겹치면 더 긴 쪽을 묻는다. 서로 다른 지원사는 겹쳐도 괜찮다.</summary>
+    [Fact]
+    public void WorkerOverlapPairAndOtherWorkers()
+    {
+        var job = ScanGrid(TRow("1200", "1250", "사사", "1A102", 20261125), TRow("1245", "1255", "아아", "1A102", 20261125));
+        var pe = Assert.Single(job.Errors);
+        Assert.StartsWith("2행 사사", pe);
+        Assert.Equal("1200~1244", Converter.FitSlot(job, job.ErrorCells[pe].Row)); // 시작은 그대로, 끝을 다음 일정 1분 앞까지
+        var b = TRow("1245", "1255", "아아", "1A102", 20261125);
+        b[ColWorker] = "홍길순";
+        Assert.Empty(ScanGrid(TRow("1200", "1250", "사사", "1A102", 20261125), b).Errors);
+    }
+
+    /// <summary>실적 칸의 띄어쓰기만 든 칸은 비운다 (goodeos 가 실적 시간 0 으로 받았다). 너무 긴 전화는 시간을 묻는다.</summary>
+    [Fact]
+    public void SpaceCellsClearedAndLongPhoneAsked()
+    {
+        var a = TRow("1125", "1126", "자자", "19101", 20261127);
+        a[ColAStart] = " ";
+        a[ColAEnd] = "  ";
+        var job = ScanGrid(a, TRow("1129", "1230", "차차", "19101", 20261127));
+        Assert.Null(job.Grid[0][ColAStart]);
+        Assert.Null(job.Grid[0][ColAEnd]);
+        Assert.Contains(job.AutoFixes, x => x.Contains("띄어쓰기만 들어 있던 칸 2개"));
+        var err = Assert.Single(job.Errors);
+        Assert.Contains("61분", err);
+        var (i, _) = job.ErrorCells[err];
+        Assert.Null(Converter.CheckFix(job, i, ColStart, "1129~1230").Problem); // 정말 그 시간이면 그대로 넣으면 된다
+        // 추천: 다른 전화(1분) 길이로 시작을 두거나 끝을 둔다
+        Assert.Equal(new[] { "1129~1130", "1229~1230" }, Converter.PhoneGuesses(job, i));
+        Assert.Equal("1129~1130", Converter.FitSlot(job, i));
+    }
 }

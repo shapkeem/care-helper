@@ -197,9 +197,11 @@
                             <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmallPrimary}" Content="고른 대로 계속" Click="ErApply_Click"/>
                             <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="모두 합치기" Margin="0,0,6,0" Click="ErMergeAll_Click"/>
                             <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="모두 따로 빼기" Margin="0,0,6,0" Click="ErSeparateAll_Click"/>
+                            <Button x:Name="ErFitAllBtn" DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="추천대로 한번에 맞추기" Margin="0,0,6,0"
+                                    Click="ErFitAll_Click" Visibility="Collapsed" ToolTip="겹치는 일정은 가장 가까운 빈 시간에, 너무 긴 전화는 추천 시간으로 한꺼번에 넣어요"/>
                             <TextBlock x:Name="ErCount" FontSize="12" Foreground="{StaticResource Muted}" VerticalAlignment="Center"/>
                         </DockPanel>
-                        <Border Style="{StaticResource ListBorder}" Margin="0,6" MaxHeight="300">
+                        <Border Style="{StaticResource ListBorder}" Margin="0,6" MaxHeight="440">
                             <ScrollViewer VerticalScrollBarVisibility="Auto">
                                 <StackPanel x:Name="ErList"/>
                             </ScrollViewer>

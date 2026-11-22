@@ -302,7 +302,10 @@ public partial class MainWindow
 
     /// <summary>[수정하기]: 이 파일의 칸에 넣은 값을 바로 확인한다. 맞는 값은 초록으로 '고침' 표시,
     /// 틀린 값은 노란 칸. 오류를 다 고쳤으면 이 파일은 통합본에 들어간다고 표시한다 (실제 고치기는 '고른 대로 계속'에서).</summary>
-    void ErFix(int k)
+    void ErFix(int k) => ErFix(k, false);
+
+    /// <summary>quiet: 안내 창·알림 없이 (겹침 한번에 맞추기). 돌려주는 값: (고친 수, 남은 수, 틀린 값들)</summary>
+    (int Fixed, int Left, List<string> Bad) ErFix(int k, bool quiet)
     {
         var f = _erFiles.First(x => x.Id == k);
         int fixedN = 0, empty = 0;
@@ -327,21 +330,56 @@ public partial class MainWindow
         int left = f.Errors.Count - fixedN;
         if (bad.Count > 0)
         {
-            Warn("노란 칸의 값을 확인해 주세요.\n\n" + string.Join("\n", bad.Take(8)));
-            return;
+            if (!quiet) Warn("노란 칸의 값을 확인해 주세요.\n\n" + string.Join("\n", bad.Take(8)));
+            return (fixedN, left, bad);
         }
         if (fixedN == 0)
         {
-            Toaster("고칠 값을 칸에 넣은 뒤 [수정하기]를 눌러 주세요.");
-            return;
+            if (!quiet) Toaster("고칠 값을 칸에 넣은 뒤 [수정하기]를 눌러 주세요.");
+            return (0, left, bad);
         }
         if (left == 0)
         {
             ErPick(k, "fix");
-            Toaster($"{f.Worker}: 오류 {fixedN}건을 다 고쳤어요. '고른 대로 계속'을 누르면 고친 값으로 통합본에 들어가요.");
+            if (!quiet) Toaster($"{f.Worker}: 오류 {fixedN}건을 다 고쳤어요. '고른 대로 계속'을 누르면 고친 값으로 통합본에 들어가요.");
         }
-        else
+        else if (!quiet)
             Toaster($"{f.Worker}: {fixedN}건 고침, {left}건 남았어요. 남은 칸도 고치거나, '오류 줄 지우고 합치기'·'따로 빼기'를 골라 주세요.");
+        return (fixedN, left, bad);
+    }
+
+    static void ErSet(FrameworkElement cf, string text)
+    {
+        if (cf is CellField c) c.Text = text;
+        else ((TextBox)cf).Text = text;
+    }
+
+    /// <summary>[겹침 한번에 맞추기]: 일정이 겹치는 줄을 모두 가장 가까운 빈 시간에 넣고 파일마다 [수정하기]를 누른다.</summary>
+    void ErFitAll_Click(object sender, RoutedEventArgs e)
+    {
+        int done = 0, files = 0;
+        var bad = new List<string>();
+        var leftNames = new List<string>();
+        foreach (var f in _erFiles)
+        {
+            bool any = false;
+            for (int n = 0; n < f.Errors.Count; n++)
+                if ((f.Errors[n].Fit ?? (f.Errors[n].Stretch != null ? Converter.StretchToken : null)) is { } fit && _erFields.TryGetValue((f.Id, n), out var cf))
+                {
+                    ErSet(cf, fit);
+                    any = true;
+                }
+            if (!any) continue;
+            files++;
+            var r = ErFix(f.Id, true);
+            done += r.Fixed;
+            if (r.Left > 0) leftNames.Add($"{f.Worker} {r.Left}건");
+            bad.AddRange(r.Bad.Select(b => $"{f.Worker}: {b}"));
+        }
+        if (bad.Count > 0) Warn($"{done}건을 추천대로 맞췄는데, 아래는 확인해 주세요.\n\n" + string.Join("\n", bad.Take(8)));
+        else if (leftNames.Count > 0)
+            Toaster($"추천대로 {done}건 맞췄어요. 추천이 없는 오류는 직접 고쳐 주세요: {string.Join(", ", leftNames)}");
+        else Toaster($"추천대로 {done}건 맞췄어요 ({files}개 파일). 바뀐 시간을 확인하고 '고른 대로 계속'을 눌러 주세요.");
     }
 
     /// <summary>오류 줄 표시: 고친 값이 있으면 초록 '✓ 고침', 없으면 원래 빨간 글자.</summary>
@@ -376,7 +414,19 @@ public partial class MainWindow
         ErList.Children.Clear();
         foreach (var f in files)
         {
-            var head = new DockPanel { Background = Res("Card"), Margin = new Thickness(0, 6, 0, 0) };
+            // 지원사(파일) 하나 = 테두리 상자 하나: 위에 이름 띠, 안에 그 사람 오류 카드들
+            var group = new StackPanel();
+            var groupBorder = new Border
+            {
+                Child = group, Background = Res("Bg"), BorderBrush = Res("Field"), BorderThickness = new Thickness(1.5),
+                CornerRadius = new CornerRadius(10), Margin = new Thickness(2, 4, 2, 12), Padding = new Thickness(0, 0, 0, 4),
+            };
+            var head = new DockPanel();
+            var headBorder = new Border
+            {
+                Child = head, Background = B("#E0E7FF"), CornerRadius = new CornerRadius(9, 9, 0, 0),
+                Padding = new Thickness(4, 2, 4, 2), Margin = new Thickness(0, 0, 0, 4),
+            };
             var btns = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 8, 4) };
             DockPanel.SetDock(btns, Dock.Right);
             Button? mer = null;
@@ -399,17 +449,45 @@ public partial class MainWindow
             btns.Children.Add(sep);
             head.Children.Add(btns);
             var title = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(8, 4, 0, 4) };
-            title.Children.Add(Label($"{f.Worker}  ·  오류 {f.Errors.Count}건", 12, true));
-            title.Children.Add(Label($"  {f.File}", 11, fg: Res("Muted")));
+            var who = Label(f.Worker, 15, true);
+            who.VerticalAlignment = VerticalAlignment.Center;
+            title.Children.Add(who);
+            var cnt = new Border
+            {
+                Background = Res("DangerBg"), CornerRadius = new CornerRadius(10), Padding = new Thickness(8, 1, 8, 1),
+                Margin = new Thickness(8, 0, 0, 0), VerticalAlignment = VerticalAlignment.Center,
+                Child = Label($"오류 {f.Errors.Count}건", 12, true, Res("Danger")),
+            };
+            title.Children.Add(cnt);
+            var fileLbl = Label($"  {f.File}", 11, fg: Res("Muted"));
+            fileLbl.VerticalAlignment = VerticalAlignment.Center;
+            title.Children.Add(fileLbl);
             head.Children.Add(title);
-            ErList.Children.Add(head);
+            group.Children.Add(headBorder);
+            ErList.Children.Add(groupBorder);
             _erBtns[f.Id] = (mer, sep);
             _erFixBtn[f.Id] = fix;
             for (int n = 0; n < f.Errors.Count; n++)
             {
                 var e = f.Errors[n];
-                var line = new DockPanel { Margin = new Thickness(8, 2, 8, 2) };
-                if (e.Field != null) // 고칠 수 있는 오류: 오른쪽에 새 값 칸
+                // 오류 하나 = 카드 한 장: ① 무엇이 틀렸나 ② 참고(겹치는 일정 등) ③ 빈 시간 버튼 ④ 고칠 칸·버튼
+                var card = new StackPanel();
+                var cardBorder = new Border
+                {
+                    Child = card, Background = Res("Card"), CornerRadius = new CornerRadius(8),
+                    Padding = new Thickness(12, 8, 12, 10), Margin = new Thickness(10, 4, 10, 4),
+                };
+                var msg = Label(e.Text, 13, true, Res("Danger"), wrap: true);
+                _erMsgs[(f.Id, n)] = msg;
+                card.Children.Add(msg);
+                var infos = new[] { e.Info, e.Stretch != null ? "[빈 시간으로 채우기] " + e.Stretch : null }.Where(x => x != null).ToList();
+                foreach (var t in infos)
+                {
+                    var info = Label("ⓘ " + t, 12, fg: Res("Muted"), wrap: true);
+                    info.Margin = new Thickness(0, 4, 0, 0);
+                    card.Children.Add(info);
+                }
+                if (e.Field != null) // 고칠 수 있는 오류: 아래 줄에 새 값 칸과 버튼
                 {
                     FrameworkElement cf;
                     if (e.Choices != null)
@@ -418,27 +496,47 @@ public partial class MainWindow
                         cf = new CellField(() => choices) { Width = 180 };
                     }
                     else
-                        cf = new TextBox { Width = 180, FontSize = 12, Height = 28, Padding = new Thickness(6, 0, 6, 0) };
-                    DockPanel.SetDock(cf, Dock.Right);
-                    line.Children.Add(cf);
+                        cf = new TextBox { Width = 160, FontSize = 13, Height = 30, Padding = new Thickness(6, 0, 6, 0),
+                                           VerticalContentAlignment = VerticalAlignment.Center };
+                    if (e.Slots is { Count: > 0 }) // 그 날 빈 시간: 누르면 그 시간을 넣는다
+                    {
+                        var wrap = new WrapPanel { Margin = new Thickness(0, 6, 0, 0) };
+                        var wl = Label(e.SlotTitle, 12, true);
+                        wl.VerticalAlignment = VerticalAlignment.Center;
+                        wl.Margin = new Thickness(0, 0, 4, 2);
+                        wrap.Children.Add(wl);
+                        int sk2 = f.Id;
+                        foreach (var slot in e.Slots)
+                        {
+                            var b = new Button { Style = (Style)FindResource("BtnTiny"), Content = slot, Margin = new Thickness(4, 0, 0, 2) };
+                            b.Click += (_, _) => { ErSet(cf, slot); ErFix(sk2); };
+                            wrap.Children.Add(b);
+                        }
+                        card.Children.Add(wrap);
+                    }
+                    var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 6, 0, 0) };
+                    var hint = Label($"{e.Field} 고치기 (지금 {e.Value})", 12, fg: Res("Muted"));
+                    hint.VerticalAlignment = VerticalAlignment.Center;
+                    hint.Margin = new Thickness(0, 0, 8, 0);
+                    row.Children.Add(hint);
+                    row.Children.Add(cf);
+                    if (e.Fit != null) // 다른 일정과 겹치는 줄: 가장 가까운 빈 시간에 넣기
+                    {
+                        var fb = new Button { Style = (Style)FindResource("BtnTiny"), Content = (e.SlotTitle == "추천 시간" ? "추천 시간으로 → " : "빈 시간에 맞추기 → ") + e.Fit, Margin = new Thickness(8, 0, 0, 0) };
+                        int fk = f.Id;
+                        var fit = e.Fit;
+                        fb.Click += (_, _) => { ErSet(cf, fit); ErFix(fk); };
+                        row.Children.Add(fb);
+                    }
                     if (e.Stretch != null) // 계획시간이 모자란 줄: 빈 시간으로 채우기
                     {
-                        var sb = new Button { Style = (Style)FindResource("BtnTiny"), Content = "빈 시간으로 채우기", Margin = new Thickness(6, 0, 6, 0),
+                        var sb = new Button { Style = (Style)FindResource("BtnTiny"), Content = "빈 시간으로 채우기", Margin = new Thickness(8, 0, 0, 0),
                                               ToolTip = e.Stretch };
                         int sk = f.Id;
-                        sb.Click += (_, _) =>
-                        {
-                            if (cf is CellField c0) c0.Text = Converter.StretchToken;
-                            else ((TextBox)cf).Text = Converter.StretchToken;
-                            ErFix(sk);
-                        };
-                        DockPanel.SetDock(sb, Dock.Right);
-                        line.Children.Add(sb);
+                        sb.Click += (_, _) => { ErSet(cf, Converter.StretchToken); ErFix(sk); };
+                        row.Children.Add(sb);
                     }
-                    var hint = Label($"{e.Field} 고치기 (지금 '{e.Value}')", 11, fg: Res("Muted"));
-                    hint.Margin = new Thickness(8, 0, 6, 0);
-                    DockPanel.SetDock(hint, Dock.Right);
-                    line.Children.Add(hint);
+                    card.Children.Add(row);
                     _erFields[(f.Id, n)] = cf;
                     _erHints[(f.Id, n)] = hint;
                     // 고친 뒤 값을 또 바꾸면 '고침' 표시를 지우고, [수정하기]를 다시 누르게 한다
@@ -451,20 +549,11 @@ public partial class MainWindow
                     if (cf is CellField cfc) cfc.Changed += Edited;
                     else ((TextBox)cf).TextChanged += (_, _) => Edited();
                 }
-                var msg = Label(e.Text, 12, fg: Res("Danger"), wrap: true);
-                _erMsgs[(f.Id, n)] = msg;
-                line.Children.Add(msg);
-                ErList.Children.Add(line);
-                if (e.Info != null || e.Stretch != null) // 지금 시간대·몇 시까지·다음 일정과 겹침, 빈 시간으로 채우면 바뀌는 것
-                {
-                    var info = Label("ⓘ " + string.Join("\n   ", new[] { e.Info, e.Stretch != null ? "[빈 시간으로 채우기] " + e.Stretch : null }
-                                         .Where(x => x != null)), 11, fg: Res("Muted"), wrap: true);
-                    info.Margin = new Thickness(20, 0, 8, 4);
-                    ErList.Children.Add(info);
-                }
+                group.Children.Add(cardBorder);
             }
             ErPick(f.Id, "separate");
         }
+        ErFitAllBtn.Visibility = files.Any(x => x.Errors.Any(y => y.Fit != null || y.Stretch != null)) ? Visibility.Visible : Visibility.Collapsed;
         CErrs.Visibility = Visibility.Visible;
         CSet($"오류가 있는 파일 {files.Count}개: 고치거나, 합칠지 따로 뺄지 골라 주세요.");
     }

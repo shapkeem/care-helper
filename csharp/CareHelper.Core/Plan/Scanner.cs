@@ -99,6 +99,18 @@ public static class Scanner
         var grid = job.Grid;
         var rowNums = job.RowNums;
 
+        // 띄어쓰기만 든 칸은 빈칸으로 (실적 칸의 " " 를 goodeos 가 실적 시간 0 으로 받아 실적이 생겼다)
+        int spaceOnly = 0;
+        foreach (var row in grid)
+            for (int c = 0; c < NumCols; c++)
+                if (row[c] is string sp && sp.Length > 0 && sp.Trim().Length == 0)
+                {
+                    row[c] = null;
+                    spaceOnly++;
+                }
+        if (spaceOnly > 0)
+            job.AutoFixes.Add($"띄어쓰기만 들어 있던 칸 {spaceOnly}개를 빈칸으로 비움");
+
         if (beneficiaries != null)
             CrossCheckBeneficiaries(job, beneficiaries);
 
@@ -229,6 +241,8 @@ public static class Scanner
         var refDay = today ?? DateOnly.FromDateTime(DateTime.Today);
         CheckDates(job, label, currentYear ?? refDay.Year, currentYear != null && today == null ? 6 : refDay.Month);
         CheckOverlaps(job, label);
+        CheckWorkerOverlaps(job);
+        CheckLongPhones(job);
     }
 
     /// <summary>파이썬 repr(str) — 작은따옴표로 감싼다 (안에 ' 가 있고 " 가 없으면 큰따옴표).</summary>
@@ -400,6 +414,73 @@ public static class Scanner
                     events.Sort();
                 }
             }
+        }
+    }
+
+    /// <summary>같은 생활지원사의 같은 날 일정끼리 겹치는지 (다른 어르신 일정끼리). 겹치면 goodeos 에 '일정중복'으로 올라간다.
+    /// 가장 많이 겹치는 줄(같으면 더 긴 줄)을 '시간을 잘못 쓴 줄'로 보고 오류로 묻는다. 그 줄을 빼고도 겹치면 다음 줄도.</summary>
+    static void CheckWorkerOverlaps(FileJob job)
+    {
+        var grid = job.Grid;
+        var groups = new Dictionary<(string, long), List<(int I, int S, int E)>>();
+        for (int i = 0; i < grid.Count; i++)
+        {
+            if (job.DroppedRows.ContainsKey(i)) continue;
+            var row = grid[i];
+            var d = NormalizeDate(row[ColDate]);
+            var s = NormalizeTime(row[ColStart]);
+            var e = NormalizeTime(row[ColEnd]);
+            if (d == null || s == null || e == null || TimeToMinutes(e) <= TimeToMinutes(s)) continue;
+            var key = (NormStr(row[ColWorker]), d.Value);
+            if (!groups.TryGetValue(key, out var l)) groups[key] = l = new();
+            l.Add((i, TimeToMinutes(s), TimeToMinutes(e)));
+        }
+        foreach (var ((_, d), all) in groups)
+        {
+            var left = all.ToList();
+            while (true)
+            {
+                var hits = left.ToDictionary(x => x.I, _ => new List<(int I, int S, int E)>());
+                for (int a = 0; a < left.Count; a++)
+                    for (int b = a + 1; b < left.Count; b++)
+                    {
+                        var (x, y) = (left[a], left[b]);
+                        // 같은 어르신끼리 겹치는 건 CheckOverlaps 가 고치기를 제안한다
+                        if (NormStr(grid[x.I][ColName]) == NormStr(grid[y.I][ColName])) continue;
+                        if (x.S < y.E && y.S < x.E)
+                        {
+                            hits[x.I].Add(y);
+                            hits[y.I].Add(x);
+                        }
+                    }
+                var worst = left.Where(x => hits[x.I].Count > 0)
+                    .OrderByDescending(x => hits[x.I].Count).ThenByDescending(x => x.E - x.S).ThenByDescending(x => x.I)
+                    .FirstOrDefault();
+                if (worst == default) break;
+                job.Error(worst.I, ColStart,
+                    $"{job.RowNums[worst.I]}행 {NormStr(grid[worst.I][ColName])} · {d % 10000 / 100}월 {d % 100}일 " +
+                    $"{MinutesToTime(worst.S)}~{MinutesToTime(worst.E)} — 같은 날 다른 일정 {hits[worst.I].Count}개와 시간이 겹쳐요");
+                left.Remove(worst);
+            }
+        }
+    }
+
+    /// <summary>전화가 너무 길면(예: 1329~1330 을 1129~1330 으로 씀) 시간을 확인하게 한다. 이미 오류로 묻는 줄은 건너뛴다.</summary>
+    static void CheckLongPhones(FileJob job)
+    {
+        var asked = job.ErrorCells.Values.Select(c => c.Row).ToHashSet();
+        for (int i = 0; i < job.Grid.Count; i++)
+        {
+            if (job.DroppedRows.ContainsKey(i) || asked.Contains(i)) continue;
+            var row = job.Grid[i];
+            if (!PhoneCodes.Contains(CleanServiceCode(row[ColCode]))) continue;
+            var s = NormalizeTime(row[ColStart]);
+            var e = NormalizeTime(row[ColEnd]);
+            if (s == null || e == null) continue;
+            int dur = TimeToMinutes(e) - TimeToMinutes(s);
+            if (dur <= MaxPhoneMinutes) continue;
+            job.Error(i, ColStart,
+                $"{job.RowNums[i]}행 {NormStr(row[ColName])} · 전화 {s}~{e} — {dur}분이라 시간을 잘못 쓴 것 같아요");
         }
     }
 

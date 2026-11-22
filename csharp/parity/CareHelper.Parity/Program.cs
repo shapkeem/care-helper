@@ -11,6 +11,29 @@ using CareHelper.Kakao;
 using CareHelper.Plan;
 using CareHelper.Scare;
 
+if (args[0] == "--scan-files") // 제공계획서 원본들을 검사만 하고 오류·자동정리를 적는다 (파일은 안 바꿈): <폴더> <결과 파일>
+{
+    var lines = new List<string>();
+    foreach (var f in Directory.GetFiles(args[1], "*.xlsx").OrderBy(x => x, StringComparer.Ordinal))
+    {
+        if (Path.GetFileName(f).StartsWith("~$")) continue;
+        var job = new FileJob(f);
+        var ws = XlsxReader.Read(File.ReadAllBytes(f), active: true);
+        Scanner.ScanFile(job, ws, null, _ => { }, null, null, new DateOnly(2026, 11, 22));
+        lines.Add($"## {job.FileName}");
+        foreach (var a in job.AutoFixes.Where(a => a.Contains("띄어쓰기"))) lines.Add("  [자동] " + a);
+        foreach (var e in job.Errors)
+        {
+            lines.Add("  [오류] " + e);
+            var (i, col) = job.ErrorCells[e];
+            if (col == PlanCodes.ColStart) lines.Add("         " + Converter.FreeSlots(job, i) + "  → 빈 시간에 맞추기: " + (Converter.FitSlot(job, i) ?? "(없음)"));
+        }
+        foreach (var p in job.Proposals.Where(p => p.Kind == "시간겹침")) lines.Add($"  [제안] {p.RowLabel}행 {p.Person} {p.CurrentDisp}→{p.SuggestedDisp} {p.Reason}");
+    }
+    File.WriteAllLines(args[2], lines);
+    return;
+}
+
 if (args[0] == "--live-daily") // 실제 goodeos 조회만 (숫자만 출력)
 {
     var t0 = DateTime.Now;

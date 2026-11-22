@@ -48,6 +48,7 @@ public static class PlanCodes
     public static readonly Dictionary<string, string> ServiceCodes = ServiceCodeList.ToDictionary(x => x.Code, x => x.Name);
 
     public static readonly HashSet<string> PhoneCodes = new() { "19101", "12101", "12201", "12301", "12401", "12606", "15101", "C1101", "C5101" };
+    public const int MaxPhoneMinutes = 10; // 전화가 이보다 길면 시간을 잘못 쓴 것 같다고 묻는다 (실제로는 1~6분)
     public const int MinMinutes = 10; // 전화가 아닌 일정(방문 등)은 10분 이상
     public static readonly Dictionary<string, string> EduCodes = new()
         { ["34202"] = "인지활동프로그램", ["33303"] = "건강교육", ["33101"] = "영양교육", ["33202"] = "보건교육" };
@@ -71,5 +72,6 @@ public static class PlanCodes
         { ColAStart, ColAEnd, ColBirth, ColGender, ColWorkerBirth, ColWorkerGender, ColVendor };
 
     public static readonly Dictionary<int, string> FixFields = new()
-        { [ColCode] = "서비스코드", [ColName] = "대상자", [ColDate] = "서비스일자", [ColEnd] = "종료시간", [ColWorker] = "생활지원사" };
+        { [ColCode] = "서비스코드", [ColName] = "대상자", [ColDate] = "서비스일자", [ColEnd] = "종료시간", [ColWorker] = "생활지원사",
+          [ColStart] = "계획시간" };
 }
