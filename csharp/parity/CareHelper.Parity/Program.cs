@@ -11,6 +11,35 @@ using CareHelper.Kakao;
 using CareHelper.Plan;
 using CareHelper.Scare;
 
+if (args[0] == "--rewrite") // 엑셀을 읽어 업로드용 쓰기(WriteRows)로 다시 쓴다: <원본> <새 파일>
+{
+    var ws = XlsxReader.Read(File.ReadAllBytes(args[1]), active: true);
+    Converter.WriteRows(args[2], ws.Rows().Select(r => r.ToArray()).ToList());
+    var back = XlsxReader.Read(File.ReadAllBytes(args[2]), active: true);
+    var a = ws.Rows().Select(r => string.Join("|", r.Select(v => v == null ? "" : v.GetType().Name + ":" + v))).ToList();
+    var b = back.Rows().Select(r => string.Join("|", r.Select(v => v == null ? "" : v.GetType().Name + ":" + v))).ToList();
+    Console.WriteLine($"다시 읽은 값 같음: {a.SequenceEqual(b)} ({a.Count}줄)");
+    return;
+}
+
+if (args[0] == "--upload-preview") // 맞광 일정실적업로드에 올려 미리보기만 받는다 (등록·삭제 안 함): <엑셀>
+{
+    await using (var pw = await GoodeosChrome.OpenSessionAsync())
+    {
+        var page = await GoodeosChrome.GetPageAsync(pw);
+        try
+        {
+            var res = await Work.UploadPlanExcelAsync(page, new Dialogs(page), args[1], Console.WriteLine, save: false, clear: false);
+            Console.WriteLine($"결과: 전체 {res.Total} · 등록 가능 {res.Ok} · 오류 {res.Errors.Count} · 저장 {res.Saved}");
+        }
+        catch (Exception e)
+        {
+            Console.WriteLine("멈춤: " + e.Message);
+        }
+    }
+    return;
+}
+
 if (args[0] == "--scare-docs") // s-care 서류 받기 시험 (읽기만): <저장 폴더> [몇 분]
 {
     var people = await ScareDocs.ListAsync();

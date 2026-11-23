@@ -162,19 +162,8 @@ public static class Converter
         }
     }
 
-    public static void WriteRows(string path, IEnumerable<object?[]> rows)
-    {
-        using var wb = new XLWorkbook();
-        var ws = wb.AddWorksheet("Sheet");
-        int r = 1;
-        foreach (var row in rows)
-        {
-            for (int c = 0; c < row.Length; c++)
-                SetCell(ws.Cell(r, c + 1), row[c]);
-            r++;
-        }
-        wb.SaveAs(path);
-    }
+    /// <summary>업로드용 엑셀 쓰기. ClosedXML 로 쓰면 goodeos 업로드가 읽다가 멈춰서 일반 엑셀 꼴로 직접 쓴다.</summary>
+    public static void WriteRows(string path, IEnumerable<object?[]> rows) => CareHelper.Excel.PlainXlsx.Write(path, rows);
 
     // ------------------------------------------------------------ 휴지통
     [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]

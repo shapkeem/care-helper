@@ -9,7 +9,7 @@
     <AssemblyName>맞춤돌봄도우미</AssemblyName>
     <RootNamespace>CareHelper.App</RootNamespace>
     <ApplicationIcon>icon.ico</ApplicationIcon>
-    <Version>4.0.3</Version>
+    <Version>4.0.4</Version>
     <Product>CareHelper</Product>
     <!-- 파일 설명(속성 창·마우스 올렸을 때)은 비운다 -->
     <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
