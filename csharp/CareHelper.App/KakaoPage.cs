@@ -41,6 +41,7 @@ public partial class MainWindow
     void BuildKakao()
     {
         SetKDay(DateTime.Today); // 실적 확인 날짜: 프로그램을 켠 날
+        SetKMonth(DateTime.Today);
         KGrid(KHdrGrid);
         for (int i = 0; i < KCols.Length; i++)
         {

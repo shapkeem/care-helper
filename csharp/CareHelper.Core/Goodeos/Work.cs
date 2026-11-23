@@ -482,6 +482,33 @@ public static class Work
         return "done";
     }
 
+    static int Mins(string hhmm)
+    {
+        var t = Hhmm(hhmm);
+        return int.Parse(t[..2]) * 60 + int.Parse(t[2..4]);
+    }
+
+    /// <summary>1분 규칙: 같은 지원사의 그날 다른 일정과 겹치거나 붙어 있으면(앞 일정 끝 1100 → 다음 시작은 1101부터) 그 일정.
+    /// 일정 창이 열려 있어야 한다. skip: 수정할 때 지울 원래 일정.</summary>
+    public static async Task<PlanEntry?> GapConflictAsync(IPage page, DateOnly d, string frm, string to, PlanEntry? skip = null)
+    {
+        var ds = d.ToString("yyyyMMdd");
+        int s = Mins(frm), e = Mins(to);
+        foreach (var p in await ReadPlansAsync(page))
+        {
+            if (p.Date != ds || string.IsNullOrEmpty(p.From) || string.IsNullOrEmpty(p.To)) continue;
+            if (skip != null && p.Seq == skip.Seq && p.From == skip.From && p.Person == skip.Person) continue;
+            if (s <= Mins(p.To) && Mins(p.From) <= e) return p;
+        }
+        return null;
+    }
+
+    static WorkError GapError(string person, DateOnly d, string frm, string to, PlanEntry c) =>
+        new($"{person} {d:MM'/'dd} {Hhmm(frm)}~{Hhmm(to)} 은(는) 같은 선생님의 {Norm(c.Person)} {c.From}~{c.To} 일정과 " +
+            $"겹치거나 1분 간격이 안 남아요. (앞 일정이 {c.To}에 끝나면 다음은 {Hhmm(MinutesToHhmm(Mins(c.To) + 1))}부터)");
+
+    static string MinutesToHhmm(int m) => $"{m / 60:00}{m % 60:00}";
+
     // ================================================================ 요청 단위 처리
     /// <summary>일정등록 (+ 지난 시간이면 실적등록).</summary>
     public static async Task<PlanEntry> DoRegisterAsync(IPage page, Dialogs dlg, string ic, string person, DateOnly d, string frm, string to,
@@ -491,6 +518,8 @@ public static class Work
         await OpenPlanAsync(page, ic, y, mo);
         if ((await FindPlansAsync(page, person, d, frm, to)).Count > 0)
             throw new WorkError($"{person} {d:MM'/'dd} {Hhmm(frm)}~{Hhmm(to)} 에 겹치는 일정이 이미 있어요.");
+        if (await GapConflictAsync(page, d, frm, to) is { } c)
+            throw GapError(person, d, frm, to, c);
         await AddPlanAsync(page, dlg, person, d, frm, to, kind);
         log($"일정 등록: {ic} / {person} / {d:MM-dd} {Hhmm(frm)}~{Hhmm(to)} {kind}");
         var plan = (await FindPlansAsync(page, person, d, frm, to, kind)).First(p => p.From == Hhmm(frm));
@@ -539,6 +568,12 @@ public static class Work
     /// <summary>기존 것 지우고 새로 등록(지난 시간이면 실적까지).</summary>
     public static async Task<PlanEntry> DoModifyAsync(IPage page, Dialogs dlg, string ic, Slot old, Slot neu, Action<string> log, DateTime? now = null)
     {
+        // 지우기 전에 새 시간이 1분 규칙에 맞는지 먼저 본다 (지운 뒤에 막히면 원래 일정만 사라진다)
+        var (y, mo) = PlanMonth(neu.Date);
+        await OpenPlanAsync(page, ic, y, mo);
+        var olds = old.Date == neu.Date ? await FindPlansAsync(page, old.Person, old.Date, old.Frm, old.To, old.Kind) : new();
+        if (await GapConflictAsync(page, neu.Date, neu.Frm, neu.To, olds.Count == 1 ? olds[0] : null) is { } c)
+            throw GapError(neu.Person, neu.Date, neu.Frm, neu.To, c);
         await DoDeleteAsync(page, dlg, ic, old.Person, old.Date, old.Frm, old.To, log, old.Kind);
         return await DoRegisterAsync(page, dlg, ic, neu.Person, neu.Date, neu.Frm, neu.To, neu.Kind!, log, now);
     }

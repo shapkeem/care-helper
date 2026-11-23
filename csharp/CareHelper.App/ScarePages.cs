@@ -80,6 +80,7 @@ public partial class MainWindow
         var err = _api.ScareOpen();
         var msg = err ?? "크롬 창을 여는 중...";
         if (_cur == "counsel") CsSet(msg, err != null);
+        else if (_cur == "docs") DcSet(msg, err != null);
         else SSet(msg, err != null);
     }
 

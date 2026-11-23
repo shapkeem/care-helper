@@ -80,6 +80,13 @@ public partial class MainWindow
                                    Fit = "1131~1139", Slots = new() { "1131~1139", "1201~1209", "1231~1239", "1311~1314", "1329~1409" } },
             } },
         });
+        On("d_list", new List<CareHelper.Scare.DocPerson>
+        {
+            new("1", "가나다", "19410929", "광안제1동", "홍길동", "S", "서비스중", "일반"),
+            new("2", "라마바", "19450302", "광안제3동", "홍길순", "S", "서비스중", "중점"),
+            new("3", "사아자", "19381117", "광안제4동", "김철수", "W", "서비스대기중", "일반"),
+        });
+        if (Environment.GetCommandLineArgs().Contains("--chips")) DemoChips("가나다", "사아자", "홍길동");
         On("k_today", new List<CareHelper.Goodeos.TodayRow>
         {
             new(0, new DateOnly(2026, 11, 20), "홍길동", "가나다", "1944-01-01", "방문안부+생활안전+말벗+정보제공", "1350", "1430", "", "", true),

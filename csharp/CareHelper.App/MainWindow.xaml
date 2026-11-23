@@ -79,16 +79,24 @@
                     <DockPanel>
                         <DockPanel DockPanel.Dock="Top">
                             <StackPanel DockPanel.Dock="Right" Orientation="Horizontal">
-                                <Button x:Name="KMonthBtn" Style="{StaticResource BtnSmall}" Content="이 달 전체 점검·넣기" Margin="0,0,6,0" Click="KMonth_Click"
-                                        ToolTip="고른 날의 달 1일부터 오늘까지 끝난 일정 중 실적이 없거나 시간이 1분이라도 다른 것을 찾아 바로 일정 시간으로 넣어요"/>
                                 <Button x:Name="KTodayFill" Style="{StaticResource BtnSmallPrimary}" Content="체크한 줄 다 실적 넣기" Click="KTodayFill_Click" IsEnabled="False"/>
                             </StackPanel>
                             <TextBlock x:Name="KTodayTitle" Text="실적 확인" FontSize="14" FontWeight="Bold" VerticalAlignment="Center"/>
-                            <!-- 날짜 고르기: 앱 버튼과 같은 둥근 모양. 가운데를 누르면 달력, ◀ ▶ 는 하루씩 -->
+                            <!-- 날짜 고르기: ‹ 날짜 › 를 한 덩어리로. 가운데를 누르면 달력, 양옆은 하루씩 -->
                             <StackPanel Orientation="Horizontal" Margin="10,0,6,0" VerticalAlignment="Center">
-                                <Button x:Name="KDayPrev" Style="{StaticResource BtnSmall}" Content="◀" Padding="0" Width="30" Click="KDayPrev_Click" ToolTip="하루 전"/>
-                                <Button x:Name="KDateBtn" Style="{StaticResource BtnSmall}" Margin="4,0" MinWidth="168" Click="KDateBtn_Click" ToolTip="눌러서 달력에서 날짜 고르기"/>
-                                <Button x:Name="KDayNext" Style="{StaticResource BtnSmall}" Content="▶" Padding="0" Width="30" Click="KDayNext_Click" ToolTip="하루 뒤"/>
+                                <Border BorderBrush="{StaticResource Field}" BorderThickness="1" CornerRadius="15" ClipToBounds="True">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="KDayPrev" Style="{StaticResource SegBtn}" Padding="11,0" Click="KDayPrev_Click" ToolTip="하루 전">
+                                            <Path Data="M5,0 L0,5 L5,10" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                                        </Button>
+                                        <Border Width="1" Background="{StaticResource Line}"/>
+                                        <Button x:Name="KDateBtn" Style="{StaticResource SegBtn}" MinWidth="160" Click="KDateBtn_Click" ToolTip="눌러서 달력에서 날짜 고르기"/>
+                                        <Border Width="1" Background="{StaticResource Line}"/>
+                                        <Button x:Name="KDayNext" Style="{StaticResource SegBtn}" Padding="11,0" Click="KDayNext_Click" ToolTip="하루 뒤">
+                                            <Path Data="M0,0 L5,5 L0,10" Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=Button}}" StrokeThickness="1.6"/>
+                                        </Button>
+                                    </StackPanel>
+                                </Border>
                                 <Popup x:Name="KDatePop" PlacementTarget="{Binding ElementName=KDateBtn}" Placement="Bottom" VerticalOffset="4"
                                        StaysOpen="False" AllowsTransparency="True">
                                     <Border Background="White" BorderBrush="{StaticResource Field}" BorderThickness="1" CornerRadius="12" Padding="8" Margin="0,0,8,8">
@@ -106,8 +114,32 @@
                             <Button x:Name="KTodayBtn" Style="{StaticResource BtnSmall}" Content="조회" Click="KToday_Click" Margin="0,0,6,0" HorizontalAlignment="Left"
                                     ToolTip="고른 날 이미 끝난 일정 중 실적이 없거나, 실적 시간이 일정과 10분 넘게 다른 것을 찾아요"/>
                         </DockPanel>
-                        <TextBlock x:Name="KTodaySub" DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource Muted}" Margin="0,4,0,0" TextWrapping="Wrap"
-                                   Text="날짜를 고르고 [조회]를 누르면 실적이 없거나 시간이 다른 일정을 보여 줘요."/>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,6,0,0">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <!-- 점검할 달 고르기 + 월 전체 점검 -->
+                                <Border BorderBrush="{StaticResource Field}" BorderThickness="1" CornerRadius="15" Margin="0,0,6,0" ClipToBounds="True">
+                                    <Button x:Name="KMonthPick" Style="{StaticResource SegBtn}" Padding="12,0" Click="KMonthPick_Click" ToolTip="점검할 달 고르기">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock x:Name="KMonthText" Text="2026년 11월" VerticalAlignment="Center"/>
+                                            <Path Data="M0,0 L4,4 L8,0" Stroke="#64748B" StrokeThickness="1.5" Margin="8,1,0,0" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                    </Button>
+                                </Border>
+                                <Popup x:Name="KMonthPop" PlacementTarget="{Binding ElementName=KMonthPick}" Placement="Bottom" VerticalOffset="6"
+                                       StaysOpen="False" AllowsTransparency="True">
+                                    <Border Background="White" BorderBrush="{StaticResource Field}" BorderThickness="1" CornerRadius="12" Padding="6" Margin="0,0,8,8">
+                                        <Border.Effect>
+                                            <DropShadowEffect BlurRadius="12" ShadowDepth="2" Opacity="0.15"/>
+                                        </Border.Effect>
+                                        <StackPanel x:Name="KMonthList" MinWidth="130"/>
+                                    </Border>
+                                </Popup>
+                                <Button x:Name="KMonthBtn" Style="{StaticResource BtnSmall}" Content="월 전체 점검·넣기" Margin="0" Click="KMonth_Click"
+                                        ToolTip="고른 달의 끝난 일정 중 실적이 없거나 시간이 1분이라도 다른 것을 찾아 바로 일정 시간으로 넣어요"/>
+                            </StackPanel>
+                            <TextBlock x:Name="KTodaySub" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" VerticalAlignment="Center"
+                                       Text="날짜를 고르고 [조회]를 누르면 실적이 없거나 시간이 다른 일정을 보여 줘요."/>
+                        </DockPanel>
                         <ScrollViewer x:Name="KTodayScroll" MaxHeight="200" VerticalScrollBarVisibility="Auto" Margin="0,4,0,0" Visibility="Collapsed">
                             <StackPanel x:Name="KTodayList"/>
                         </ScrollViewer>
@@ -319,6 +351,60 @@
                 <Border Style="{StaticResource ListBorder}" CornerRadius="0,0,10,10">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel x:Name="CsList"/>
+                    </ScrollViewer>
+                </Border>
+            </DockPanel>
+
+            <!-- ======================== s-care 서류 받기 ======================== -->
+            <DockPanel x:Name="PageDocs" Visibility="Collapsed">
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button Style="{StaticResource Btn}" Content="s-care 열기" Margin="0,0,6,0" Click="SOpen_Click"/>
+                        <Button x:Name="DcStopBtn" Style="{StaticResource Btn}" Content="멈춤" Margin="0,0,6,0" Click="DcStop_Click" Visibility="Collapsed"/>
+                        <Button x:Name="DcStartBtn" Style="{StaticResource BtnPrimary}" Content="서류 받기" Click="DcStart_Click"/>
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="s-care 서류 받기" FontSize="22" FontWeight="Bold"/>
+                        <TextBlock Text="어르신을 고르고 [서류 받기]를 누르면 s-care에서 내려받아 어르신별 폴더에 모아요."
+                                   FontSize="13" Foreground="{StaticResource Muted}" TextWrapping="Wrap"/>
+                    </StackPanel>
+                </DockPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <TextBlock Text="받을 서류 (눌러서 켜고 꺼요)" FontSize="12" Foreground="{StaticResource Muted}" Margin="2,0,0,4"/>
+                    <StackPanel x:Name="DcKinds" Orientation="Horizontal"/>
+                </StackPanel>
+                <StackPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <TextBlock Text="저장 폴더 (어르신마다 '이름_생년월일' 폴더를 만들어 넣어요)" FontSize="12" Foreground="{StaticResource Muted}" Margin="2,0,0,4"/>
+                    <DockPanel>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="폴더 열기" Margin="6,0,0,0" Click="DcOpenFolder_Click"/>
+                        <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="바꾸기" Margin="6,0,0,0" Click="DcPickFolder_Click"/>
+                        <TextBox x:Name="DcFolder" IsReadOnly="True" FontSize="12" HorizontalContentAlignment="Left" VerticalContentAlignment="Center"/>
+                    </DockPanel>
+                </StackPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,6">
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="초기화" Margin="6,0,0,0" Click="DcReset_Click"
+                            ToolTip="이름 칩과 체크를 모두 지워요"/>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="전체 선택" Margin="6,0,0,0" Click="DcAll_Click"/>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource BtnSmall}" Content="명단 불러오기" Margin="6,0,0,0" Click="DcLoad_Click"/>
+                    <!-- 이름 칸: 쉼표(,)나 엔터를 치면 이름이 회색 칩이 되고, 그 어르신이 명단에서 체크된다 -->
+                    <Border x:Name="DcNameBox" Background="White" BorderBrush="{StaticResource Field}" BorderThickness="1" CornerRadius="10"
+                            Padding="5,2" MinHeight="34" Cursor="IBeam">
+                        <Grid>
+                            <WrapPanel x:Name="DcNameWrap" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="DcSearchHint" Text="이름을 쉼표(,)로 나눠 여러 명 넣기 (예: 홍길동,홍길순) · 지원사·행정동으로 찾기도 돼요"
+                                       FontSize="12" Foreground="#94A3B8" Margin="7,0,0,0" VerticalAlignment="Center" IsHitTestVisible="False"/>
+                        </Grid>
+                    </Border>
+                </DockPanel>
+                <TextBlock x:Name="DcMsg" DockPanel.Dock="Top" FontSize="12" Foreground="{StaticResource Muted}" TextWrapping="Wrap" Margin="2,0,0,6"
+                           Text="s-care에 로그인한 뒤 [명단 불러오기]를 눌러 주세요."/>
+                <RichTextBox x:Name="DcLog" DockPanel.Dock="Bottom" Style="{StaticResource LogBox}" Height="72" Margin="0,8,0,0"/>
+                <Border DockPanel.Dock="Top" Background="{StaticResource Card}" CornerRadius="8,8,0,0" Padding="8,5">
+                    <Grid x:Name="DcHdr"/>
+                </Border>
+                <Border Style="{StaticResource ListBorder}" CornerRadius="0,0,10,10">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                        <StackPanel x:Name="DcList"/>
                     </ScrollViewer>
                 </Border>
             </DockPanel>

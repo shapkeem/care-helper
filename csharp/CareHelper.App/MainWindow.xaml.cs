@@ -177,7 +177,7 @@ public partial class MainWindow : Window
     void Build()
     {
         foreach (var (key, text) in new[] { ("daily", "일일실적 점검"), ("kakao", "카톡 요청 처리"), ("conv", "제공계획서 변환"),
-                                            ("scare", "서비스 제공계획 입력"), ("counsel", "서비스 상담지 입력") })
+                                            ("scare", "서비스 제공계획 입력"), ("counsel", "서비스 상담지 입력"), ("docs", "s-care 서류 받기") })
             NavTop.Children.Add(NavItem(key, text));
         NavBottom.Children.Add(NavItem("settings", "설정"));
         Ver.Text = $"v{AppInfo.AppVersion}";
@@ -186,12 +186,14 @@ public partial class MainWindow : Window
         _pages["conv"] = PageConv;
         _pages["scare"] = PageScare;
         _pages["counsel"] = PageCounsel;
+        _pages["docs"] = PageDocs;
         _pages["settings"] = PageSettings;
         BuildDaily();
         BuildKakao();
         BuildConv();
         BuildScare();
         BuildCounsel();
+        BuildDocs();
     }
 
     Border NavItem(string key, string text)
@@ -261,6 +263,7 @@ public partial class MainWindow : Window
         {
             t.Stop();
             var root = (FrameworkElement)Content;
+            if (args.Contains("--chiptest")) System.IO.File.WriteAllText(path + ".txt", DemoChipTest());
             if (args.Contains("--erscroll") && ErList.Parent is System.Windows.Controls.ScrollViewer esv) // 시험용: 오류 목록 맨 아래
             {
                 esv.ScrollToEnd();
@@ -509,6 +512,18 @@ public partial class MainWindow : Window
                 break;
             case "cs_done":
                 CsDone((DoneEv)d!);
+                break;
+            case "d_list":
+                DcLoaded((List<CareHelper.Scare.DocPerson>)d!);
+                break;
+            case "d_log":
+                LogAdd(DcLog, (string)d!);
+                break;
+            case "d_row":
+                DcRow((RowStatusEv)d!);
+                break;
+            case "d_done":
+                DcDone((DoneEv)d!);
                 break;
             case "settings_msg":
                 var sm = (MsgEv)d!;

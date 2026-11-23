@@ -765,6 +765,82 @@ public sealed class Api
         return (items.Select(i => (i.Name, i.Hour)).ToList(), null);
     }
 
+    // ---- s-care 서류 받기
+    CancellationTokenSource? _docsStop;
+
+    public static string DocsDefaultRoot() =>
+        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), "s-care 서류");
+
+    public (string Root, List<string> Kinds) DocsInfo()
+    {
+        var root = Settings.GetString("docs_root");
+        var kinds = Settings.GetString("docs_kinds");
+        return (root.Length > 0 ? root : DocsDefaultRoot(),
+                kinds.Length > 0 ? kinds.Split('|').Where(ScareDocs.Kinds.Contains).ToList() : ScareDocs.Kinds.ToList());
+    }
+
+    /// <summary>s-care 서비스상태관리 명단을 받는다 → d_list 또는 d_done(오류)</summary>
+    public string? DocsLoad()
+    {
+        if (B["scare"].V) return "s-care 작업이 이미 진행 중이에요.";
+        B["scare"].V = true;
+        Thread(async () =>
+        {
+            try
+            {
+                _emit("d_list", await ScareDocs.ListAsync());
+            }
+            catch (ScareError e)
+            {
+                _emit("d_done", new DoneEv(e.Message));
+            }
+            catch (Exception e)
+            {
+                _emit("d_done", new DoneEv($"명단을 받지 못했어요: {FirstLine(e)}"));
+            }
+            finally
+            {
+                B["scare"].V = false;
+            }
+        });
+        return null;
+    }
+
+    public string? DocsStart(List<DocPerson> people, List<string> kinds, string root)
+    {
+        if (B["scare"].V) return "s-care 작업이 이미 진행 중이에요.";
+        if (people.Count == 0) return "서류를 받을 어르신을 체크해 주세요.";
+        if (kinds.Count == 0) return "받을 서류를 하나 이상 골라 주세요.";
+        Settings.Save(("docs_root", root), ("docs_kinds", string.Join("|", kinds)));
+        B["scare"].V = true;
+        _docsStop = new CancellationTokenSource();
+        var stop = _docsStop.Token;
+        Thread(async () =>
+        {
+            try
+            {
+                await ScareDocs.RunAsync(people, kinds, root, (i, st, note) => _emit("d_row", new RowStatusEv(i, st, note)),
+                                         m => _emit("d_log", m), stop);
+                _emit("d_done", new DoneEv(null));
+            }
+            catch (ScareError e)
+            {
+                _emit("d_done", new DoneEv(e.Message));
+            }
+            catch (Exception e)
+            {
+                _emit("d_done", new DoneEv($"문제가 생겼어요: {FirstLine(e)}"));
+            }
+            finally
+            {
+                B["scare"].V = false;
+            }
+        });
+        return null;
+    }
+
+    public void DocsStop() => _docsStop?.Cancel();
+
     // ---- 설정
     /// <summary>password·jevKey 가 null 이면 저장돼 있던 값을 그대로 쓴다 (화면에서 가려진 채 그대로일 때).</summary>
     public MsgEv SaveSettings(string userId, string? password, string? jevKey, bool hide)

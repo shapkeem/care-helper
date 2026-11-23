@@ -11,6 +11,18 @@ using CareHelper.Kakao;
 using CareHelper.Plan;
 using CareHelper.Scare;
 
+if (args[0] == "--scare-docs") // s-care 서류 받기 시험 (읽기만): <저장 폴더> [몇 분]
+{
+    var people = await ScareDocs.ListAsync();
+    Console.WriteLine($"목록 {people.Count}명 · 상태 " + string.Join(", ", people.GroupBy(p => p.Status).Select(g => $"{g.Key} {g.Count()}")));
+    int n = args.Length > 2 ? int.Parse(args[2]) : 1;
+    var pick = people.Take(n).ToList();
+    var sw0 = System.Diagnostics.Stopwatch.StartNew();
+    await ScareDocs.RunAsync(pick, ScareDocs.Kinds, args[1], (i, st, note) => Console.WriteLine($"  [{i}] {st} {note} ({sw0.Elapsed.TotalSeconds:0}s)"), Console.WriteLine);
+
+    return;
+}
+
 if (args[0] == "--scan-files") // 제공계획서 원본들을 검사만 하고 오류·자동정리를 적는다 (파일은 안 바꿈): <폴더> <결과 파일>
 {
     var lines = new List<string>();

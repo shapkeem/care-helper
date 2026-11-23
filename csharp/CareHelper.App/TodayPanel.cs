@@ -67,16 +67,44 @@ public partial class MainWindow
     void TodayBusy(bool busy)
     {
         KTodayBtn.IsEnabled = !busy;
-        KMonthBtn.IsEnabled = !busy;
+        KMonthBtn.IsEnabled = KMonthPick.IsEnabled = !busy;
         KDateBtn.IsEnabled = KDayPrev.IsEnabled = KDayNext.IsEnabled = !busy;
         if (busy) KTodayFill.IsEnabled = false;
         else SetKDay(_kDay); // ▶ 는 오늘보다 앞일 때만
     }
 
     /// <summary>[이 달 전체 점검·넣기]: 목록 없이 바로 넣는다.</summary>
+    DateTime _kMonth = new(DateTime.Today.Year, DateTime.Today.Month, 1); // 월 전체 점검할 달
+
+    void SetKMonth(DateTime m)
+    {
+        _kMonth = new DateTime(m.Year, m.Month, 1);
+        KMonthText.Text = _kMonth.ToString("yyyy년 M월", Ko);
+    }
+
+    /// <summary>달 고르기: 이번 달부터 1년 전까지</summary>
+    void KMonthPick_Click(object sender, RoutedEventArgs e)
+    {
+        KMonthList.Children.Clear();
+        var first = new DateTime(DateTime.Today.Year, DateTime.Today.Month, 1);
+        for (int i = 0; i < 12; i++)
+        {
+            var m = first.AddMonths(-i);
+            bool on = m == _kMonth;
+            var b = new Button { Style = (Style)FindResource("SegBtn"), HorizontalContentAlignment = HorizontalAlignment.Left,
+                                 Content = new TextBlock { Text = m.ToString("yyyy년 M월", Ko) + (i == 0 ? "  (이번 달)" : ""),
+                                                           FontWeight = on ? FontWeights.Bold : FontWeights.Normal },
+                                 Foreground = on ? B("#1D4ED8") : Res("Text") };
+            var mm = m;
+            b.Click += (_, _) => { SetKMonth(mm); KMonthPop.IsOpen = false; };
+            KMonthList.Children.Add(b);
+        }
+        KMonthPop.IsOpen = true;
+    }
+
     void KMonth_Click(object sender, RoutedEventArgs e)
     {
-        var day = DateOnly.FromDateTime(_kDay);
+        var day = DateOnly.FromDateTime(_kMonth);
         var range = day.Year == DateTime.Today.Year && day.Month == DateTime.Today.Month ? $"{day.Month}월 1일부터 오늘까지" : $"{day.Year}년 {day.Month}월 한 달";
         if (!Ask($"{range} 끝난 일정을 모두 점검해서,\n실적이 없거나 시간이 1분이라도 다른 것을 일정 시간 그대로 넣을까요?\n(지원사가 많으면 몇 분 걸려요)"))
             return;

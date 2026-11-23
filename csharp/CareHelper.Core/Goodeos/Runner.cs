@@ -222,6 +222,13 @@ public static class Runner
             if (k == null) throw new WorkError("건너뜀");
             if (k == "옮김") over.Add(p);
         }
+        // 1분 규칙: 지우지 않고 남는 일정과 붙거나 겹치면 지우기 전에 멈춘다 (앞 일정 1100 끝 → 다음은 1101부터)
+        int ns = int.Parse(Hhmm(it.Frm)[..2]) * 60 + int.Parse(Hhmm(it.Frm)[2..]), ne = int.Parse(Hhmm(it.To)[..2]) * 60 + int.Parse(Hhmm(it.To)[2..]);
+        static int M(string t) => int.Parse(t[..2]) * 60 + int.Parse(t[2..4]);
+        var touch = ps.FirstOrDefault(p => !over.Contains(p) && p.From.Length == 4 && p.To.Length == 4 && ns <= M(p.To) && M(p.From) <= ne);
+        if (touch != null)
+            throw new WorkError($"{it.Person} {d:MM'/'dd} {Hhmm(it.Frm)}~{Hhmm(it.To)} 은(는) {Norm(touch.Person)} {touch.From}~{touch.To} 일정과 " +
+                                $"1분 간격이 안 남아요. (앞 일정이 {touch.To}에 끝나면 다음은 {(M(touch.To) + 1) / 60:00}{(M(touch.To) + 1) % 60:00}부터) 아무것도 바꾸지 않았어요.");
         foreach (var p in over)
         {
             log($"기존 일정 지움: {p.Person} {T(p)}");
