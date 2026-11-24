@@ -224,24 +224,42 @@ public static class Updater
     {
         var src = bridgeSrc ?? Path.Combine(AppContext.BaseDirectory, BridgeName);
         var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
-        var deskExe = Path.Combine(desk, AppInfo.AppName + ".exe");
         if (!File.Exists(HomeExe))
         {
             if (!File.Exists(src)) return "";
             Directory.CreateDirectory(HomeDir);
             File.Copy(src, HomeExe, true);
-            // 바탕화면에 있던 연결 exe 는 C 로 옮겼으니 치운다 (바로가기로 바뀜)
-            if (File.Exists(deskExe) && IsBridge(deskExe))
-                try { File.Delete(deskExe); } catch { }
+            // 바탕화면에 있던 연결 exe 는 C 로 옮겼으니 치운다 (바로가기로 바뀜). 이름이 달라도 연결 exe 면 모두
+            foreach (var f in Directory.EnumerateFiles(desk, "*.exe").ToList())
+                if (IsBridge(f))
+                    try { File.Delete(f); } catch { }
             WriteShortcut(DesktopLnk, HomeExe);
             return "moved";
         }
-        if (File.Exists(DesktopLnk) && !LnkPointsHome(DesktopLnk))
+        // C 에 이미 있는데 바탕화면에 켜는 파일(이름이 달라도 연결 exe 면)이 또 있으면 치우고 바로가기 하나만 남긴다
+        // (예: 예전 판을 받아 켰더니 그 파일이 최신 연결 exe 로 바뀐 경우)
+        int removed = 0;
+        try
+        {
+            foreach (var f in Directory.EnumerateFiles(desk, "*.exe").ToList())
+                if (IsBridge(f))
+                    try { File.Delete(f); removed++; } catch { }
+        }
+        catch
+        {
+        }
+        if (!File.Exists(DesktopLnk))
+        {
+            if (removed == 0) return ""; // 바로가기를 일부러 지운 사람에게 다시 만들지 않는다
+            WriteShortcut(DesktopLnk, HomeExe);
+            return "moved";
+        }
+        if (!LnkPointsHome(DesktopLnk))
         {
             WriteShortcut(DesktopLnk, HomeExe);
             return "relinked";
         }
-        return "";
+        return removed > 0 ? "moved" : "";
     }
 
     /// <summary>바로가기가 C:\맞춤돌봄도우미\맞춤돌봄도우미.exe 를 가리키는지</summary>

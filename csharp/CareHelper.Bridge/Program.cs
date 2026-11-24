@@ -176,6 +176,9 @@ static class Program
         var desk = Env("CAREHELPER_BRIDGE_DESKTOP") ?? Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         var lnk = Path.Combine(desk, AppName + ".lnk");
         if (!File.Exists(lnk)) return;
+        // 켜는 파일이 C:\맞춤돌봄도우미 에 있으면 바로가기는 그 파일을 가리켜야 한다 (업데이트해도 자리가 그대로)
+        var home = Path.Combine(@"C:\맞춤돌봄도우미", AppName + ".exe");
+        if (File.Exists(home)) target = home;
         string Q(string s) => s.Replace("'", "''");
         var ps = $"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{Q(lnk)}');" +
                  $"$s.TargetPath='{Q(target)}';$s.WorkingDirectory='{Q(Path.GetDirectoryName(target))}';$s.Save()";

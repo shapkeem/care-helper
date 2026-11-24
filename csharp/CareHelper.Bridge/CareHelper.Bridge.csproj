@@ -11,7 +11,7 @@
     <AssemblyName>CareHelperBridge</AssemblyName>
     <RootNamespace>CareHelper.Bridge</RootNamespace>
     <ApplicationIcon>..\CareHelper.App\icon.ico</ApplicationIcon>
-    <Version>4.0.5</Version>
+    <Version>4.0.6</Version>
     <Product>CareHelper</Product>
     <!-- 파일 설명(속성 창·마우스 올렸을 때)은 비운다 -->
     <GenerateAssemblyTitleAttribute>false</GenerateAssemblyTitleAttribute>
