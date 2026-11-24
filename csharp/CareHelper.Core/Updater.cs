@@ -220,8 +220,35 @@ public static class Updater
     /// <summary>켤 때: C:\맞춤돌봄도우미 에 켜는 파일이 없으면 넣고(바탕화면의 연결 exe 는 그리로 옮김),
     /// 바탕화면에 그 파일을 가리키는 바로가기를 만든다. 이미 있으면 바로가기가 다른 곳(예전 버전 폴더)을 가리킬 때만 고친다.
     /// → 한 일 ("" 이면 할 일 없음)</summary>
+    /// <summary>파이썬판이 스스로 업데이트하며 남기는 예전 파일(CareHelper-1.0.0.old.exe 등)을 치운다.
+    /// 파이썬판은 다음에 켜질 때 지웠는데, 이제는 C#판이 켜지므로 여기서 지운다.</summary>
+    public static int CleanPythonLeftovers()
+    {
+        int n = 0;
+        var dirs = new[]
+        {
+            Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
+            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
+            AppInfo.AppDataDir, HomeDir,
+        };
+        foreach (var dir in dirs.Where(d => d.Length > 0 && Directory.Exists(d)).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (var pat in new[] { "CareHelper*.old*.exe", AppInfo.AppName + "*.old*.exe", "CareHelper*.new.exe", AppInfo.AppName + "*.new.exe" })
+            {
+                try
+                {
+                    foreach (var f in Directory.EnumerateFiles(dir, pat).ToList())
+                        try { File.Delete(f); n++; } catch { } // 아직 실행 중이면 다음에 켤 때 지운다
+                }
+                catch
+                {
+                }
+            }
+        return n;
+    }
+
     public static string SetupHome(string? bridgeSrc = null)
     {
+        try { CleanPythonLeftovers(); } catch { }
         var src = bridgeSrc ?? Path.Combine(AppContext.BaseDirectory, BridgeName);
         var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
         if (!File.Exists(HomeExe))
