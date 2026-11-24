@@ -16,6 +16,7 @@ public partial class App : Application
             Task.Run(() =>
             {
                 try { Updater.RefreshBridges(); } catch { } // 예전 자리의 연결 exe 를 새것으로 (화면을 늦추지 않게 뒤에서)
+                try { Updater.SetupHome(); } catch { } // C:\맞춤돌봄도우미 에 켜는 파일 + 바탕화면 바로가기
             });
             new MainWindow().Show();
         }

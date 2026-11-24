@@ -190,9 +190,84 @@ public static class Updater
         Process.Start(new ProcessStartInfo(exe) { WorkingDirectory = Path.GetDirectoryName(exe)!, UseShellExecute = true });
     }
 
-    /// <summary>바탕화면에 '맞춤돌봄도우미' 바로가기를 만든다(있으면 새 위치로 바꿈).</summary>
+    /// <summary>프로그램을 켜는 자리: C:\맞춤돌봄도우미\맞춤돌봄도우미.exe (연결 exe — 늘 가장 새 버전을 켠다).
+    /// 바탕화면에는 이 파일을 가리키는 바로가기만 둔다. 업데이트해도 이 자리는 그대로라 바로가기를 바꿀 일이 없다.</summary>
+    public const string HomeDir = @"C:\맞춤돌봄도우미";
+    public static string HomeExe => Path.Combine(HomeDir, AppInfo.AppName + ".exe");
+    static string DesktopLnk => Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory), AppInfo.AppName + ".lnk");
+
+    static void WriteShortcut(string lnk, string target)
+    {
+        var ps = $"$s=(New-Object -ComObject WScript.Shell).CreateShortcut('{lnk.Replace("'", "''")}');" +
+                 $"$s.TargetPath='{target.Replace("'", "''")}';$s.WorkingDirectory='{Path.GetDirectoryName(target)!.Replace("'", "''")}';$s.Save()";
+        var psi = new ProcessStartInfo("powershell") { CreateNoWindow = true, UseShellExecute = false };
+        foreach (var a in new[] { "-NoProfile", "-NonInteractive", "-Command", ps }) psi.ArgumentList.Add(a);
+        Process.Start(psi)?.WaitForExit(20000);
+    }
+
+    static bool IsBridge(string f)
+    {
+        try
+        {
+            return string.Equals(FileVersionInfo.GetVersionInfo(f).OriginalFilename, BridgeName, StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>켤 때: C:\맞춤돌봄도우미 에 켜는 파일이 없으면 넣고(바탕화면의 연결 exe 는 그리로 옮김),
+    /// 바탕화면에 그 파일을 가리키는 바로가기를 만든다. 이미 있으면 바로가기가 다른 곳(예전 버전 폴더)을 가리킬 때만 고친다.
+    /// → 한 일 ("" 이면 할 일 없음)</summary>
+    public static string SetupHome(string? bridgeSrc = null)
+    {
+        var src = bridgeSrc ?? Path.Combine(AppContext.BaseDirectory, BridgeName);
+        var desk = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+        var deskExe = Path.Combine(desk, AppInfo.AppName + ".exe");
+        if (!File.Exists(HomeExe))
+        {
+            if (!File.Exists(src)) return "";
+            Directory.CreateDirectory(HomeDir);
+            File.Copy(src, HomeExe, true);
+            // 바탕화면에 있던 연결 exe 는 C 로 옮겼으니 치운다 (바로가기로 바뀜)
+            if (File.Exists(deskExe) && IsBridge(deskExe))
+                try { File.Delete(deskExe); } catch { }
+            WriteShortcut(DesktopLnk, HomeExe);
+            return "moved";
+        }
+        if (File.Exists(DesktopLnk) && !LnkPointsHome(DesktopLnk))
+        {
+            WriteShortcut(DesktopLnk, HomeExe);
+            return "relinked";
+        }
+        return "";
+    }
+
+    /// <summary>바로가기가 C:\맞춤돌봄도우미\맞춤돌봄도우미.exe 를 가리키는지</summary>
+    static bool LnkPointsHome(string lnk)
+    {
+        try
+        {
+            var t = Type.GetTypeFromProgID("WScript.Shell");
+            if (t == null) return false;
+            dynamic sh = Activator.CreateInstance(t)!;
+            string target = sh.CreateShortcut(lnk).TargetPath;
+            return string.Equals(Path.GetFullPath(target), Path.GetFullPath(HomeExe), StringComparison.OrdinalIgnoreCase);
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>업데이트 뒤: 켜는 파일(C:\맞춤돌봄도우미)이 있으면 바로가기는 그대로 둔다. 없으면 바탕화면 바로가기가
+    /// <b>이미 있을 때만</b> 새 버전을 가리키게 바꾼다 (없으면 만들지 않는다).</summary>
     public static void MakeDesktopShortcut(string target)
     {
+        if (File.Exists(HomeExe)) return;
+        var lnk = DesktopLnk;
+        if (!File.Exists(lnk)) return;
         var ps = "$d=[Environment]::GetFolderPath('Desktop');" +
                  $"$s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d '{AppInfo.AppName}.lnk'));" +
                  $"$s.TargetPath='{target.Replace("'", "''")}';$s.WorkingDirectory='{Path.GetDirectoryName(target)!.Replace("'", "''")}';$s.Save()";
@@ -217,6 +292,7 @@ public static class Updater
             Environment.GetFolderPath(Environment.SpecialFolder.CommonDesktopDirectory),
             Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "Downloads"),
             AppInfo.AppDataDir,
+            HomeDir,
         };
         int n = 0;
         foreach (var dir in dirs.Where(d => d.Length > 0 && Directory.Exists(d)).Distinct(StringComparer.OrdinalIgnoreCase))

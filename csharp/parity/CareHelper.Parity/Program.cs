@@ -11,6 +11,12 @@ using CareHelper.Kakao;
 using CareHelper.Plan;
 using CareHelper.Scare;
 
+if (args[0] == "--setup-home") // C:\맞춤돌봄도우미 켜는 파일 + 바탕화면 바로가기: <연결 exe>
+{
+    Console.WriteLine("결과: " + Updater.SetupHome(args[1]));
+    return;
+}
+
 if (args[0] == "--rewrite") // 엑셀을 읽어 업로드용 쓰기(WriteRows)로 다시 쓴다: <원본> <새 파일>
 {
     var ws = XlsxReader.Read(File.ReadAllBytes(args[1]), active: true);
