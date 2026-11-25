@@ -22,7 +22,8 @@ public sealed record UploadDoneEv(int Total, int Ok, List<string> Errors, bool S
 public sealed record MsgEv(bool Ok, string Msg);
 public sealed record TodayOneEv(int Id, bool Ok, string Msg);
 public sealed record RowStatusEv(int I, string Status, string Note);
-public sealed record DoneEv(string? Error);
+/// <param name="NothingSaved">true 면 저장을 시작하기 전에 멈춤 (로그인·계획자 확인 단계) → '아무것도 저장하지 않았어요'라고 말해도 된다</param>
+public sealed record DoneEv(string? Error, bool NothingSaved = false);
 public sealed record StatusEv(string Kind, string Text, string? Scare);
 public sealed record CounselRow(string Name, string File);
 public sealed record ConvInfo(string Src, string Dst, int SrcCount, string Roster, bool RosterToday, string Workers, bool WorkersToday, int Leftovers);
@@ -227,8 +228,39 @@ public sealed class Api
     }
 
     // ---- 카톡 요청 처리
-    public string? KakaoStart(string text) => Job.Start(text);
-    public string? KakaoRun(List<ReviewRow> rows) => Job.Run(rows);
+    public string? KakaoStart(string text) => B["lists"].V ? "명단을 받는 중이에요. 끝난 뒤에 눌러 주세요." : Job.Start(text);
+    public string? KakaoRun(List<ReviewRow> rows) => B["lists"].V ? "명단을 받는 중이에요. 끝난 뒤에 눌러 주세요." : Job.Run(rows);
+
+    /// <summary>카톡 화면의 '명단 새로 받기': 오늘 받은 명단이 있어도 맞광에서 대상자·생활지원사 명단을 다시 받는다
+    /// (그날 담당 생활지원사가 바뀌었을 때). 끝나면 k_lists_done(MsgEv).</summary>
+    public string? KakaoRefreshLists()
+    {
+        if (B["lists"].V) return "명단을 받는 중이에요.";
+        if (B["kakao"].V) return "카톡 요청을 읽거나 처리하는 중이에요. 끝난 뒤에 눌러 주세요.";
+        if (B["conv"].V) return "제공계획서 변환이나 업로드가 진행 중이에요. 끝난 뒤에 눌러 주세요.";
+        B["lists"].V = true;
+        Thread(async () =>
+        {
+            void Log(string m) => _emit("k_log", $"{DateTime.Now:HH:mm:ss} {m}");
+            try
+            {
+                Log("명단 새로 받는 중...");
+                await Lists.FetchDailyListsAsync(Log, force: true);
+                _emit("k_lists_done", new MsgEv(true, "새 명단을 받았어요. [읽기]를 다시 누르면 새 명단으로 표를 만들어요."));
+            }
+            catch (Exception e)
+            {
+                Log($"[오류] 명단을 받지 못했어요: {e.Message}");
+                _emit("k_lists_done", new MsgEv(false, $"명단을 받지 못했어요: {e.Message}"));
+            }
+            finally
+            {
+                B["lists"].V = false;
+                GoodeosChrome.ScheduleClose();
+            }
+        });
+        return null;
+    }
     public void KakaoAnswer(string? value) => Job.Answer(value);
     public void KakaoStop() => Job.Stop();
 
@@ -407,6 +439,8 @@ public sealed class Api
                 var res = await Task.Run(() => Converter.Run(Log, roster, workers,
                     (d, t) => _emit("conv_progress", new ConvProgressEv(d, t, null)), ConvReview, ConvErrors));
                 _convDel = (res.DeletableSources, res.DeletableOutputs);
+                _convRan = true;
+                _convUpload = Converter.UploadFileOf(res.DeletableOutputs); // 올릴 파일은 이번 변환이 만든 것만
                 Log("");
                 Log($"총 {res.Total}개 중 {res.Ok}개 성공, {res.Failed.Count}개 실패.");
                 foreach (var (name, reason) in res.Failed) Log($"  - {name} ({reason})");
@@ -436,6 +470,7 @@ public sealed class Api
     {
         if (B["lists"].V) return "명단을 받는 중이에요.";
         if (B["conv"].V && !ConvWaitingUser) return "변환이나 업로드가 진행 중이에요. 끝난 뒤에 눌러 주세요.";
+        if (B["kakao"].V) return "카톡 요청을 읽거나 처리하는 중이에요. 끝난 뒤에 눌러 주세요.";
         bool midReview = B["conv"].V;
         B["lists"].V = true;
         Thread(async () =>
@@ -529,13 +564,23 @@ public sealed class Api
         return "원본과 변환 결과를 휴지통으로 보냈어요. (휴지통에서 되돌릴 수 있어요)";
     }
 
+    bool _convRan;        // 프로그램을 켠 뒤 변환을 한 번이라도 했는가
+    string? _convUpload;  // 그 변환이 만든 올릴 파일 (통합본 또는 하나뿐인 변환 파일)
+
+    /// <summary>올릴 파일: 이번에 변환했으면 그 변환이 만든 파일만 (폴더에 남은 예전 파일은 올리지 않는다).
+    /// 변환 없이 바로 올리면(프로그램을 다시 켠 뒤) 예전처럼 '작업후' 폴더의 최근 통합본.</summary>
+    string? UploadTarget(string dst) =>
+        _convRan ? (_convUpload != null && File.Exists(_convUpload) ? _convUpload : null) : Converter.FindUploadFile(dst);
+
     /// <summary>올릴 파일 이름과 줄 수 (확인 창에 보여 줄 것). 없으면 Error.</summary>
     public (string? File, int Rows, string? Error) ConvUploadInfo()
     {
         var (_, dst) = Converter.WorkFolders();
-        var f = Converter.FindUploadFile(dst);
+        var f = UploadTarget(dst);
         if (f == null)
-            return (null, 0, "올릴 통합본이 없어요. 먼저 변환을 해 주세요. (이미 올린 파일은 이름에 '(업로드완료)'가 붙어 있어요)");
+            return (null, 0, _convRan
+                ? "이번 변환에서 올릴 파일이 없어요. (오류 파일만 있었거나 이미 올렸어요. 올린 파일은 이름에 '(업로드완료)'가 붙어 있어요)"
+                : "올릴 통합본이 없어요. 먼저 변환을 해 주세요. (이미 올린 파일은 이름에 '(업로드완료)'가 붙어 있어요)");
         return (Path.GetFileName(f), Converter.CountDataRows(f), null);
     }
 
@@ -543,8 +588,8 @@ public sealed class Api
     {
         if (B["conv"].V) return "변환이나 업로드가 이미 진행 중이에요.";
         var (_, dst) = Converter.WorkFolders();
-        var f = Converter.FindUploadFile(dst);
-        if (f == null) return "올릴 통합본이 없어요.";
+        var f = UploadTarget(dst);
+        if (f == null) return "올릴 파일이 없어요.";
         B["conv"].V = true;
         Thread(async () =>
         {
@@ -562,6 +607,7 @@ public sealed class Api
                 if (res.Saved)
                 {
                     var neu = Converter.MarkUploaded(f);
+                    if (_convUpload == f) _convUpload = null; // 같은 파일을 다시 올리지 않게
                     _convDel = (_convDel.Src, _convDel.Out.Select(o => o == f ? neu : o).ToList());
                     Log($"파일 이름을 '{Path.GetFileName(neu)}'(으)로 바꿨어요. 같은 파일을 다시 올리지 않게요.");
                 }
@@ -652,7 +698,7 @@ public sealed class Api
             }
             catch (ScareError e) // 로그인 안 됨, 계획자 틀림: 아무것도 저장하지 않음
             {
-                _emit("s_done", new DoneEv(e.Message));
+                _emit("s_done", new DoneEv(e.Message, NothingSaved: true));
             }
             catch (Exception e)
             {
@@ -751,7 +797,7 @@ public sealed class Api
             }
             catch (ScareError e) // 로그인 안 됨, 상담자 틀림: 아무것도 저장하지 않음
             {
-                _emit("cs_done", new DoneEv(e.Message));
+                _emit("cs_done", new DoneEv(e.Message, NothingSaved: true));
             }
             catch (Exception e)
             {

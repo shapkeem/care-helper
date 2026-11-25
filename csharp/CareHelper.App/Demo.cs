@@ -37,6 +37,51 @@ public partial class MainWindow
         return outp;
     }
 
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool SetCursorPos(int x, int y);
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern void mouse_event(uint f, int dx, int dy, uint d, IntPtr e);
+
+    /// <summary>시험용 (--demo --page kakao --droptest 결과파일): 카톡 표 '요청' 칸의 ▾ 를 진짜 마우스로 눌러
+    /// 목록이 열린 채로 있는지, 다시 누르면 닫히는지 본다.</summary>
+    internal void DemoDropTest(string path)
+    {
+        var outp = new List<string>();
+        var cf = (CellField)_kData.Values.First().W["action"];
+        var arrow = (System.Windows.FrameworkElement)cf.Children[1];
+        var pop = (System.Windows.Controls.Primitives.Popup)typeof(CellField).GetField("_pop", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance)!.GetValue(cf)!;
+        var t0 = DateTime.Now;
+        string T() => $"{(DateTime.Now - t0).TotalMilliseconds:0}ms";
+        System.ComponentModel.DependencyPropertyDescriptor.FromProperty(System.Windows.Controls.Primitives.Popup.IsOpenProperty, typeof(System.Windows.Controls.Primitives.Popup))
+            .AddValueChanged(pop, (_, _) => outp.Add($"  {T()} IsOpen={pop.IsOpen}"));
+        arrow.PreviewMouseLeftButtonDown += (_, _) => outp.Add($"  {T()} ▾ 누름");
+        arrow.PreviewMouseLeftButtonUp += (_, _) => outp.Add($"  {T()} ▾ 뗌");
+        Topmost = true;
+        Activate();
+        async void Run()
+        {
+            await Task.Delay(1500);
+            void Click()
+            {
+                var p = arrow.PointToScreen(new System.Windows.Point(arrow.ActualWidth / 2, arrow.ActualHeight / 2));
+                SetCursorPos((int)p.X, (int)p.Y);
+                mouse_event(0x0002, 0, 0, 0, IntPtr.Zero);
+                Thread.Sleep(80);
+                mouse_event(0x0004, 0, 0, 0, IntPtr.Zero);
+            }
+            Click();
+            await Task.Delay(700);
+            outp.Add($"1번 누름 → 목록 열림={pop.IsOpen}");
+            Click();
+            await Task.Delay(700);
+            outp.Add($"2번 누름 → 목록 열림={pop.IsOpen}");
+            Click();
+            await Task.Delay(700);
+            outp.Add($"3번 누름 → 목록 열림={pop.IsOpen}");
+            System.IO.File.WriteAllText(path, string.Join("\n", outp));
+            System.Windows.Application.Current.Shutdown();
+        }
+        Dispatcher.BeginInvoke(Run, System.Windows.Threading.DispatcherPriority.ApplicationIdle);
+    }
+
     internal void DemoFill()
     {
         On("check_done", new CheckDoneEv(120, 5, 2, 1, 340, new()
@@ -55,7 +100,9 @@ public partial class MainWindow
             new ReviewRow { Id = 3, Ic = "", Person = "", Date = "", Time = "", Kind = "", Action = "", Source = "안녕하세요", Checked = false, Status = "요청 아님", Note = "요청하는 말이 없어요" },
         }, new() { "홍길동", "김철수" }, new() { ["홍길동"] = new() { "가나다", "라마바" }, ["김철수"] = new() { "사아자" } },
             new() { "가나다", "라마바", "사아자" }, Goodeos.Work.ServiceList.Select(x => x.Kind).ToList(), Lists.ActionsRun.ToList(), today));
-        On("k_question", new QuestionEv("홍길동 · 가나다 · 11/12 14:00~? · 수정\n몇 분 동안 했어요?", new() { ("30분", ""), ("40분", ""), ("60분", "") }));
+        On("k_question", new QuestionEv("홍길동 · 가나다 · 11/12 11:10~11:40 방문 · 수정\n⚠ 1110~1140 은(는) 라마바 11:00~11:30 방문 (실적 없음) 일정과 겹치거나 " +
+                                        "1분 간격이 안 남아요. (앞 일정이 1130에 끝나면 다음은 1131부터)\n다른 시간을 고르거나 아래 칸에 적어 주세요.",
+            new() { ("1131~1201", "이 시간으로 바꿔서 등록"), ("1029~1059", "이 시간으로 바꿔서 등록"), ("직접 입력", "아래 칸에 1131~1201처럼 적은 시간으로") }));
         On("k_log", "12:00:00 ▶ 홍길동 · 가나다");
         On("conv_review", new List<ReviewItem>
         {

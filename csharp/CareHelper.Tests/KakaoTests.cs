@@ -11,6 +11,16 @@ public class KakaoTests : IDisposable
 {
     static readonly DateOnly Mon = new(2026, 10, 19); // 월요일
 
+    [Fact]
+    public void FreeSlotsKeepOneMinuteGap()
+    {
+        // 다른 어르신 11:00~11:30 이 있을 때 30분 일정을 11:10 에 넣으려 하면: 11:31~12:01, 10:29~10:59 를 권한다
+        var rest = new List<CareHelper.Goodeos.PlanEntry> { new("20261231", "1100", "1130", "가나다", "1A102", "1", false, "") };
+        Assert.Equal(new[] { "1131~1201", "1029~1059" }, CareHelper.Goodeos.Runner.FreeSlots(rest, 30, 11 * 60 + 10));
+        // 요청한 시간이 비어 있으면 그 시간이 맨 앞
+        Assert.Equal("0900~0930", CareHelper.Goodeos.Runner.FreeSlots(rest, 30, 9 * 60)[0]);
+    }
+
     public KakaoTests()
     {
         Jev.AskOverride = (_, _) => throw new Exception("이 문장은 Jev 없이 풀려야 해요");

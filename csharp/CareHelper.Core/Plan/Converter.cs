@@ -199,13 +199,16 @@ public static class Converter
     // ------------------------------------------------------------ 통합본·업로드 파일
     static bool IsUserXlsx(string f) => !Path.GetFileName(f).StartsWith("~$");
 
-    public static string? MergeConvertedFiles(string targetFolder, Action<string>? log = null)
+    /// <param name="only">이번 변환이 저장한 파일들. 주면 이 파일만 합친다 (폴더에 남은 예전 변환 파일·'(업로드완료)' 파일이
+    /// 통합본에 섞여 예전 일정이 다시 올라가던 문제, 2026-11-25). null 이면 폴더의 파일 전부 (예전 방식).</param>
+    public static string? MergeConvertedFiles(string targetFolder, Action<string>? log = null, IEnumerable<string>? only = null)
     {
-        var files = Glob(targetFolder, ".xlsx").Where(f =>
+        var pick = only != null ? only.Where(File.Exists) : Glob(targetFolder, ".xlsx");
+        var files = pick.Where(f =>
         {
             var stem = Path.GetFileNameWithoutExtension(f);
-            return !stem.StartsWith(MergedFileBaseName) && !stem.StartsWith(ErrorFilePrefix) && IsUserXlsx(f);
-        }).ToList();
+            return !stem.StartsWith(MergedFileBaseName) && !stem.StartsWith(ErrorFilePrefix) && !stem.Contains(UploadedMark) && IsUserXlsx(f);
+        }).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         if (files.Count < 2) // 파일이 하나뿐이면 통합본을 만들지 않음
         {
             if (files.Count > 0) log?.Invoke("변환된 파일이 하나뿐이라 통합본은 만들지 않았습니다.");
@@ -252,6 +255,15 @@ public static class Converter
         if (merged.Count > 0)
             return merged.OrderByDescending(f => File.GetLastWriteTimeUtc(f)).First();
         return files.Count == 1 ? files[0] : null;
+    }
+
+    /// <summary>이번 변환이 저장한 파일 중 올릴 것: 통합본이 있으면 통합본, 없으면 파일이 하나일 때 그 파일. 없으면 null.</summary>
+    public static string? UploadFileOf(IEnumerable<string> outputs)
+    {
+        var list = outputs.Where(f => File.Exists(f) && !Path.GetFileNameWithoutExtension(f).Contains(UploadedMark)).ToList();
+        var merged = list.FirstOrDefault(f => Path.GetFileNameWithoutExtension(f).StartsWith(MergedFileBaseName));
+        if (merged != null) return merged;
+        return list.Count == 1 ? list[0] : null;
     }
 
     public static int CountDataRows(string path)
@@ -1019,7 +1031,7 @@ public static class Converter
 
         try
         {
-            var merged = MergeConvertedFiles(targetFolder, log);
+            var merged = MergeConvertedFiles(targetFolder, log, deletableOutputs.ToList()); // 이번에 저장한 파일만
             if (merged != null) deletableOutputs.Add(merged);
         }
         catch (Exception e)

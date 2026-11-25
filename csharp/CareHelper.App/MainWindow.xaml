@@ -62,6 +62,8 @@
             <DockPanel x:Name="PageKakao" Visibility="Collapsed">
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Top">
+                        <Button x:Name="KListsBtn" Style="{StaticResource Btn}" Content="명단 새로 받기" Click="KLists_Click" Margin="0,0,6,0"
+                                ToolTip="오늘 받은 대상자·생활지원사 명단이 있어도 맞광에서 다시 받아요 (그날 담당 선생님이 바뀌었을 때)"/>
                         <Button Style="{StaticResource Btn}" Content="멈춤" Click="KStop_Click" Margin="0,0,6,0"/>
                         <Button x:Name="KStartBtn" Style="{StaticResource Btn}" Content="읽기" Click="KStart_Click" Margin="0,0,6,0"/>
                         <Button x:Name="KRunBtn" Style="{StaticResource BtnPrimary}" Content="실행" Click="KRun_Click"/>

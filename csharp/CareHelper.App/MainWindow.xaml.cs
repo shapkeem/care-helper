@@ -35,6 +35,7 @@ public partial class MainWindow : Window
     readonly Dictionary<string, FrameworkElement> _pages = new();
     readonly Dictionary<string, Border> _nav = new();
     string _cur = "";
+    bool _exiting; // 업데이트 뒤 스스로 닫는 중 (작업 중이어도 묻지 않음)
     readonly DispatcherTimer _toastTimer = new() { Interval = TimeSpan.FromMilliseconds(1800) };
     readonly DispatcherTimer _statusTimer = new() { Interval = TimeSpan.FromSeconds(8) };
 
@@ -62,7 +63,18 @@ public partial class MainWindow : Window
         // 표 안의 한 줄 칸 위에서 휠을 돌려도 표가 스크롤되게 (WPF 글칸은 휠을 자기가 먹어 버린다)
         EventManager.RegisterClassHandler(typeof(TextBox), PreviewMouseWheelEvent, new MouseWheelEventHandler(WheelToList));
         Loaded += (_, _) => Start();
-        Closing += (_, _) => _api.CloseChrome();
+        Closing += (_, e) =>
+        {
+            // 작업 중에 닫으면 크롬이 꺼져 맞광·s-care 작업이 중간에 멈춘다 (업로드면 기존 일정만 지워진 채로 끝날 수 있음)
+            if (!_exiting && _api.AnyBusy() &&
+                MessageBox.Show("아직 작업 중이에요. 지금 닫으면 하던 작업이 중간에 멈춰요.\n그래도 닫을까요?", AppInfo.AppName,
+                                MessageBoxButton.YesNo, MessageBoxImage.Warning, MessageBoxResult.No) != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+            _api.CloseChrome();
+        };
         Drop += Window_Drop;
         DragOver += (_, e) =>
         {
@@ -253,7 +265,19 @@ public partial class MainWindow : Window
     {
         var args = Environment.GetCommandLineArgs().ToList();
         int i = args.IndexOf("--dump");
-        if (i < 0 || i + 1 >= args.Count) return;
+        if (i < 0 || i + 1 >= args.Count)
+        {
+            // 시험용: --demo 만 주면 가짜 자료를 채운 채로 창을 띄워 둔다 (직접 눌러 보는 시험)
+            if (args.Contains("--demo"))
+            {
+                Demo.Fill(this);
+                int p0 = args.IndexOf("--page");
+                if (p0 >= 0 && p0 + 1 < args.Count) Show(args[p0 + 1]);
+                int d0 = args.IndexOf("--droptest");
+                if (d0 >= 0 && d0 + 1 < args.Count) DemoDropTest(args[d0 + 1]);
+            }
+            return;
+        }
         var path = args[i + 1];
         if (args.Contains("--demo")) Demo.Fill(this);
         int pi = args.IndexOf("--page");
@@ -481,6 +505,9 @@ public partial class MainWindow : Window
             case "conv_lists_done":
                 ConvListsDone((MsgEv)d!);
                 break;
+            case "k_lists_done":
+                KListsDone((MsgEv)d!);
+                break;
             case "conv_upload_done":
                 ConvUploadDone((UploadDoneEv)d!);
                 break;
@@ -488,6 +515,7 @@ public partial class MainWindow : Window
                 var m = (MsgEv)d!;
                 SSet(m.Msg, !m.Ok);
                 CsSet(m.Msg, !m.Ok);
+                DcSet(m.Msg, !m.Ok); // 서류 받기 화면에서 [s-care 열기]를 눌렀을 때도 결과가 보이게
                 break;
             case "s_log":
                 LogAdd(SLog, (string)d!);
@@ -548,7 +576,8 @@ public partial class MainWindow : Window
                 UpdOverlay.Visibility = Visibility.Collapsed; // 실패하면 지금 버전을 그대로 쓰게 풀어 준다
                 Toaster((string)d!);
                 break;
-            case "exit":
+            case "exit": // 업데이트가 끝나 새 버전을 켰다: 묻지 않고 닫는다
+                _exiting = true;
                 Application.Current.Shutdown();
                 break;
         }

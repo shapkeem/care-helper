@@ -22,6 +22,31 @@ public class PlanTests
         new object?[] { day, "1330", "1400", null, null, name, 19441217L, "여", "나종순", 19700101L, "여", "1A102", vendor };
 
     [Fact]
+    public void MergeUsesOnlyThisRunFiles()
+    {
+        // '작업후' 폴더에 예전 변환 파일·(업로드완료) 파일이 남아 있어도 이번에 만든 파일만 통합본에 들어간다
+        var dir = Directory.CreateTempSubdirectory().FullName;
+        var head = StandardHeaders.Cast<object?>().ToArray();
+        string Make(string name, long day)
+        {
+            var p = Path.Combine(dir, name);
+            Converter.WriteRows(p, new List<object?[]> { head, Row(day) });
+            return p;
+        }
+        Make("홍길동 10월1일.xlsx", 20261001);                 // 예전 변환 파일
+        Make("홍길순 10월2일(업로드완료).xlsx", 20261002);      // 예전에 올린 파일
+        var a = Make("김철수 11월23일.xlsx", 20261123);
+        var b = Make("이영희 11월24일.xlsx", 20261124);
+        var merged = Converter.MergeConvertedFiles(dir, null, new[] { a, b })!;
+        var ws = XlsxReader.Read(File.ReadAllBytes(merged), active: true);
+        var days = Enumerable.Range(2, ws.MaxRow - 1).Select(r => Convert.ToInt64(ws.Cell(r, 1))).OrderBy(x => x).ToList();
+        Assert.Equal(new long[] { 20261123, 20261124 }, days);
+        Assert.Equal(merged, Converter.UploadFileOf(new[] { a, b, merged }));
+        Assert.Equal(a, Converter.UploadFileOf(new[] { a }));
+        Assert.Null(Converter.UploadFileOf(new[] { a, b })); // 둘 이상인데 통합본이 없으면 올리지 않는다
+    }
+
+    [Fact]
     public void SameFilesAreUsedOnce()
     {
         var dir = Directory.CreateTempSubdirectory();

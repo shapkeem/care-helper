@@ -552,13 +552,13 @@ public static class Work
             await CloseLayerAsync(page);
             await OpenResultAsync(page, person, ic, y, mo);
             await DeleteResultAsync(page, dlg, p.Seq, d);
-            log($"실적 삭제: {person} / {d:MM-dd} {p.From}~{p.To}");
+            log($"실적 삭제: {person} / {d:MM-dd} {p.From}~{p.To} {KindOf(p.Code) ?? p.Code}");
             await OpenPlanAsync(page, ic, y, mo);
             var seq = p.Seq;
             p = (await FindPlansAsync(page, person, d, p.From, p.To)).First(q => q.Seq == seq);
         }
         await DeletePlanAsync(page, p);
-        log($"일정 삭제: {person} / {d:MM-dd} {p.From}~{p.To}");
+        log($"일정 삭제: {person} / {d:MM-dd} {p.From}~{p.To} {KindOf(p.Code) ?? p.Code}");
         await CloseLayerAsync(page);
         return p;
     }

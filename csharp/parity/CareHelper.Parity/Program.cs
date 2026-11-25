@@ -81,6 +81,47 @@ if (args[0] == "--scan-files") // 제공계획서 원본들을 검사만 하고 
     return;
 }
 
+if (args[0] == "--day-plans") // 지원사의 그날 일정 전부 (읽기만): <지원사> <yyyy-MM-dd>
+{
+    await using var pw0 = await GoodeosChrome.OpenSessionAsync();
+    var pg = await GoodeosChrome.GetPageAsync(pw0);
+    var d = DateOnly.Parse(args[2]);
+    var (y, m) = Work.PlanMonth(d);
+    await Work.OpenPlanAsync(pg, args[1], y, m);
+    var ds = d.ToString("yyyyMMdd");
+    foreach (var p in (await Work.ReadPlansAsync(pg)).Where(p => p.Date == ds).OrderBy(p => p.From))
+        Console.WriteLine($"  {p.Person} {p.From}~{p.To} {Work.KindOf(p.Code) ?? p.Code} 실적={(p.Result ? "있음" : "없음")}");
+    Console.WriteLine("끝");
+    return;
+}
+
+if (args[0] == "--kakao-item") // 카톡 표 한 줄을 실제로 처리 (쓰기!): <지원사> <어르신> <yyyy-MM-dd> <시작~끝 또는 -> <서비스 또는 -> <요청> [질문 답]
+{
+    await using var pw0 = await GoodeosChrome.OpenSessionAsync();
+    var pg = await GoodeosChrome.GetPageAsync(pw0);
+    var dlg = new Dialogs(pg);
+    var tm = args[4] == "-" ? new[] { "", "" } : args[4].Split('~');
+    var it = new Item { Ic = args[1], Person = args[2], Date = DateOnly.Parse(args[3]), Frm = tm[0], To = tm[1],
+                        Kind = args[5] == "-" ? "" : args[5], Action = args[6], Source = "시험", Id = 1 };
+    var answers = new Queue<string>(args.Length > 7 ? args[7].Split('|') : Array.Empty<string>()); // 질문마다 차례로 답한다
+    string? Ask(string q, List<(string Key, string? Desc)> o)
+    {
+        var answer = answers.Count > 0 ? answers.Dequeue() : null; // 답이 떨어지면 건너뜀 (끝없이 묻지 않게)
+        Console.WriteLine($"질문: {q.Replace("\n", " / ")} · 보기: {string.Join(", ", o.Select(x => x.Key))} → 답 {answer ?? "(건너뜀)"}");
+        return answer;
+    }
+    try
+    {
+        await Runner.RunItemAsync(pg, dlg, it, Ask, m => Console.WriteLine("log: " + m), DateTime.Now);
+        Console.WriteLine($"결과: 완료 · 메모: {it.Note}");
+    }
+    catch (Exception e)
+    {
+        Console.WriteLine($"결과: 멈춤 · {e.Message}");
+    }
+    return;
+}
+
 if (args[0] == "--live-daily") // 실제 goodeos 조회만 (숫자만 출력)
 {
     var t0 = DateTime.Now;

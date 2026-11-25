@@ -466,6 +466,12 @@ public sealed class KakaoJob
                 if (a != null) Log($"답변: {a}");
                 return a;
             }
+            // '직접 입력' 보기가 있는 질문(겹쳐서 다른 시간 묻기): 적은 시간을 그대로 답으로
+            if (options.Any(o => o.Key == Runner.TimeInputKey) && Lists.ParseRange(a) is { } tr)
+            {
+                Log($"답변: {tr.A}~{tr.B}");
+                return $"{tr.A}~{tr.B}";
+            }
             string? k;
             try
             {
@@ -500,13 +506,13 @@ public sealed class KakaoJob
             _status($"처리 중... ({counter[0]}/{counter[1]})");
         }
         it.Status = "처리 중";
+        it.Note = "";
         SetRow(it);
         Log($"▶ {it.Label()}");
         try
         {
             await RunItem(page, dlg, it, AskUser, Log, now());
-            it.Status = "완료";
-            it.Note = "";
+            it.Status = "완료"; // 처리하면서 남긴 메모(지운 일정의 시간·서비스 등)는 그대로 보여 준다
         }
         catch (WorkError e)
         {

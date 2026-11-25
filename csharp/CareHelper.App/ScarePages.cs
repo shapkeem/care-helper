@@ -124,13 +124,18 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>오류로 끝났을 때 덧붙일 말: 저장 전에 멈췄을 때만 '아무것도 저장하지 않았어요' (예전에는 늘 그렇게 말했다)</summary>
+    static string SavedNote(DoneEv d) => d.NothingSaved
+        ? "\n\n아무것도 저장하지 않았어요."
+        : "\n\n그 전에 저장된 분이 있을 수 있어요. 표의 상태와 s-care에서 확인해 주세요.";
+
     void SDone(DoneEv d)
     {
         SStartBtn.IsEnabled = true;
         if (d.Error != null)
         {
             SSet(d.Error, true);
-            Warn(d.Error + "\n\n아무것도 저장하지 않았어요.");
+            Warn(d.Error + SavedNote(d));
             return;
         }
         int ok = _sRows.Count(r => r.Status == "완료");
@@ -361,7 +366,7 @@ public partial class MainWindow
         if (d.Error != null)
         {
             CsSet(d.Error, true);
-            Warn(d.Error + "\n\n아무것도 저장하지 않았어요.");
+            Warn(d.Error + SavedNote(d));
             return;
         }
         int ok = _csRows.Count(r => r.Status == "완료");

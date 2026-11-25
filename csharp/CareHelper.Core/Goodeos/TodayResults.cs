@@ -105,7 +105,9 @@ public static class TodayResults
         var (y, m) = Work.PlanMonth(day);
         if (plan.Result)
         {
-            if (row.Missing)
+            // 실적이 아예 없던 줄인데 그새 들어왔으면 그대로 둔다. 시작만 있고 끝이 빈 실적(끝 없음)은 일정 시간으로 덮어쓴다
+            // (예전에는 끝 없음도 '그새 들어왔다'로 보고 고치지 않은 채 '넣었어요'로 셌다, 2026-11-25)
+            if (row.Missing && row.ResFrom.Length == 0)
             {
                 log($"{row.Ic} · {row.Person} {row.PlanText}: 그새 실적이 들어와 있어요");
                 return;
@@ -117,6 +119,13 @@ public static class TodayResults
             return;
         }
         await Work.OpenResultAsync(page, row.Person, row.Ic, y, m);
+        if (row.ResFrom.Length > 0) // 끝 없는 실적이 남아 있는데 일정에는 실적 표시가 없는 경우도 덮어쓴다
+        {
+            await Work.OverwriteResultAsync(page, dlg, plan.Seq, day, row.PlanFrom, row.PlanTo);
+            log($"실적 시간 고침: {row.Ic} · {row.Person} {row.ResText} → {row.PlanText}");
+            await Work.CloseLayerAsync(page);
+            return;
+        }
         var r = await Work.RegisterResultAsync(page, dlg, plan.Seq, day);
         if (r == "already")
             throw new WorkError("실적이 이미 있어서 넣지 못했어요.");

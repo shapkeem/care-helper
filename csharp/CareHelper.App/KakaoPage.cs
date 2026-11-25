@@ -70,6 +70,28 @@ public partial class MainWindow
 
     void KStop_Click(object sender, RoutedEventArgs e) => _api.KakaoStop();
 
+    /// <summary>명단 새로 받기: 오늘 받은 명단이 있어도 맞광에서 다시 받는다 (그날 담당 선생님이 바뀌었을 때)</summary>
+    void KLists_Click(object sender, RoutedEventArgs e)
+    {
+        var err = _api.KakaoRefreshLists();
+        if (err != null)
+        {
+            Toaster(err);
+            return;
+        }
+        KListsBtn.IsEnabled = false;
+        KListsBtn.Content = "받는 중...";
+        KStatus.Text = "명단 새로 받는 중...";
+    }
+
+    void KListsDone(MsgEv m)
+    {
+        KListsBtn.IsEnabled = true;
+        KListsBtn.Content = "명단 새로 받기";
+        KStatus.Text = m.Msg;
+        Toaster(m.Msg);
+    }
+
     /// <summary>읽기 결과로 확인 표를 그린다.</summary>
     void KRows(KakaoRows d)
     {
@@ -227,7 +249,7 @@ public partial class MainWindow
         }
         KQText.Text = d.Question;
         KQOpts.Children.Clear();
-        foreach (var (key, desc) in d.Options.Take(12))
+        foreach (var (key, desc) in d.Options.Where(o => o.Key != Goodeos.Runner.TimeInputKey).Take(12)) // '직접 입력'은 아래 칸에 적으면 된다
         {
             var text = key + (desc.Length > 0 && desc != key ? " · " + desc : "");
             if (text.Length > 40) text = text[..39] + "…";

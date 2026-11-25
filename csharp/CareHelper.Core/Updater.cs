@@ -358,6 +358,10 @@ public static class Updater
                     var v = FileVersionInfo.GetVersionInfo(f);
                     if (!string.Equals(v.OriginalFilename, BridgeName, StringComparison.OrdinalIgnoreCase)) continue;
                     if (v.FileVersion == sv.FileVersion && v.CompanyName == sv.CompanyName) continue;
+                    // 예전 판(시험용으로 받은 3.9.9 등)을 켰을 때 더 새 켜는 파일을 예전 것으로 되돌리지 않는다 (2026-11-25)
+                    if (string.IsNullOrEmpty(sv.FileVersion) ||
+                        (!string.IsNullOrEmpty(v.FileVersion) && ParseVersion(v.FileVersion).CompareTo(ParseVersion(sv.FileVersion)) > 0))
+                        continue;
                     File.Copy(src, f, true);
                     n++;
                 }

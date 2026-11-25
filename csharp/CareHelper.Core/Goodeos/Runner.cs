@@ -205,7 +205,9 @@ public static class Runner
             }
             return;
         }
-        var over = ps.Where(p => Overlap(p.From, p.To, it.Frm, it.To)).ToList();
+        // 지워도 되는 건 이 어르신의 겹치는 일정뿐이다. 다른 어르신 일정과 겹치면 아래 1분 규칙 검사에서 멈춘다
+        // (예전에는 겹치는 다른 어르신 일정·실적까지 지웠다, 2026-11-25)
+        var over = ps.Where(p => Norm(p.Person) == Norm(it.Person) && Overlap(p.From, p.To, it.Frm, it.To)).ToList();
         if (kind.Length == 0) // 서비스가 안 적혀 있으면 겹치던 일정의 서비스를 그대로
         {
             var kinds = over.Select(p => KindOf(p.Code)).Where(x => x != null).Distinct().ToList();
@@ -222,19 +224,75 @@ public static class Runner
             if (k == null) throw new WorkError("건너뜀");
             if (k == "옮김") over.Add(p);
         }
-        // 1분 규칙: 지우지 않고 남는 일정과 붙거나 겹치면 지우기 전에 멈춘다 (앞 일정 1100 끝 → 다음은 1101부터)
-        int ns = int.Parse(Hhmm(it.Frm)[..2]) * 60 + int.Parse(Hhmm(it.Frm)[2..]), ne = int.Parse(Hhmm(it.To)[..2]) * 60 + int.Parse(Hhmm(it.To)[2..]);
-        static int M(string t) => int.Parse(t[..2]) * 60 + int.Parse(t[2..4]);
-        var touch = ps.FirstOrDefault(p => !over.Contains(p) && p.From.Length == 4 && p.To.Length == 4 && ns <= M(p.To) && M(p.From) <= ne);
-        if (touch != null)
-            throw new WorkError($"{it.Person} {d:MM'/'dd} {Hhmm(it.Frm)}~{Hhmm(it.To)} 은(는) {Norm(touch.Person)} {touch.From}~{touch.To} 일정과 " +
-                                $"1분 간격이 안 남아요. (앞 일정이 {touch.To}에 끝나면 다음은 {(M(touch.To) + 1) / 60:00}{(M(touch.To) + 1) % 60:00}부터) 아무것도 바꾸지 않았어요.");
+        // 1분 규칙: 지우지 않고 남는 일정(다른 어르신 일정 포함)과 붙거나 겹치면, 지우기 전에 경고하고 다른 시간을 묻는다
+        // (앞 일정 1100 끝 → 다음은 1101부터). 건너뛰면 아무것도 바꾸지 않는다.
+        var movedOk = over.Where(p => !Overlap(p.From, p.To, it.Frm, it.To)).ToList(); // '옮김'으로 고른 원래 일정
+        while (true)
+        {
+            int ns = M(Hhmm(it.Frm)), ne = M(Hhmm(it.To));
+            var rest = ps.Where(p => !over.Contains(p) && p.From.Length == 4 && p.To.Length == 4).ToList();
+            var touch = rest.FirstOrDefault(p => ns <= M(p.To) && M(p.From) <= ne);
+            if (touch == null) break;
+            var why = $"{Hhmm(it.Frm)}~{Hhmm(it.To)} 은(는) {Norm(touch.Person)} {Desc(touch)} 일정과 겹치거나 1분 간격이 안 남아요. " +
+                      $"(앞 일정이 {touch.To}에 끝나면 다음은 {MinHm(M(touch.To) + 1)}부터)";
+            var pick = AskNewTime(ask, it, why, rest, ne - ns, ns);
+            if (pick == null)
+                throw new WorkError($"{it.Person} {d:MM'/'dd} {why} 아무것도 바꾸지 않았어요.");
+            log($"시간을 {pick.Value.A}~{pick.Value.B}(으)로 바꿔서 다시 확인해요 (원래 {Hhmm(it.Frm)}~{Hhmm(it.To)})");
+            (it.Frm, it.To) = pick.Value;
+            over = ps.Where(p => Norm(p.Person) == Norm(it.Person) && Overlap(p.From, p.To, it.Frm, it.To)).Concat(movedOk).Distinct().ToList();
+        }
         foreach (var p in over)
         {
-            log($"기존 일정 지움: {p.Person} {T(p)}");
+            log($"기존 일정 지움: {p.Person} {Desc(p)}");
             await DoDeleteAsync(page, dlg, it.Ic, p.Person, d, p.From, p.To, log);
         }
         await DoRegisterAsync(page, dlg, it.Ic, it.Person, d, it.Frm, it.To, kind, log, now);
+        it.Note = (over.Count > 0 ? "지움: " + string.Join(", ", over.Select(Desc)) + " → " : "") +
+                  $"등록: {Hhmm(it.Frm)[..2]}:{Hhmm(it.Frm)[2..]}~{Hhmm(it.To)[..2]}:{Hhmm(it.To)[2..]} {kind}";
+    }
+
+    static int M(string t) => int.Parse(t[..2]) * 60 + int.Parse(t[2..4]);
+    static string MinHm(int m) => $"{m / 60:00}{m % 60:00}";
+
+    /// <summary>질문 보기 중 '직접 입력': 이 보기가 있으면 질문 칸에 적은 시간(1131~1201)도 답으로 받는다.</summary>
+    public const string TimeInputKey = "직접 입력";
+
+    /// <summary>남는 일정들 사이 빈 시간 중, 길이 dur(분)이 들어가고 1분 규칙을 지키는 시간을 want(분)에 가까운 순서로.</summary>
+    internal static List<string> FreeSlots(List<PlanEntry> rest, int dur, int want, int take = 4)
+    {
+        var cands = new List<int> { want };
+        foreach (var p in rest)
+        {
+            cands.Add(M(p.To) + 1);
+            cands.Add(M(p.From) - 1 - dur);
+        }
+        return cands.Distinct()
+            .Where(s => s >= 6 * 60 && s + dur <= 22 * 60 && rest.All(p => s + dur < M(p.From) || s > M(p.To)))
+            .OrderBy(s => Math.Abs(s - want)).ThenBy(s => s).Take(take)
+            .Select(s => $"{MinHm(s)}~{MinHm(s + dur)}").ToList();
+    }
+
+    /// <summary>겹친다고 경고하고 다른 시간을 묻는다: 빈 시간 버튼 / 직접 적기 / 건너뛰기. → 새 (시작, 끝) 또는 null(건너뜀)</summary>
+    static (string A, string B)? AskNewTime(AskUser ask, Item it, string why, List<PlanEntry> rest, int dur, int want)
+    {
+        var slots = FreeSlots(rest, dur, want);
+        var opts = slots.Select(s => (s, (string?)"이 시간으로 바꿔서 등록")).ToList();
+        opts.Add((TimeInputKey, "아래 칸에 1131~1201처럼 적은 시간으로")); // 화면에는 버튼으로 안 보이고, 칸에 적은 시간을 받는 표시
+        // 건너뛰기는 질문 칸의 [건너뛰기] 버튼으로 (보기로 또 넣으면 버튼이 두 개)
+        var q = $"{it.Label()}\n⚠ {why}\n다른 시간을 고르거나 아래 칸에 적어 주세요." + (slots.Count == 0 ? " (같은 길이로 비어 있는 시간이 없어요)" : "");
+        while (true)
+        {
+            var a = ask(q, opts);
+            if (a == null || a == "건너뛰기") return null;
+            if (a == TimeInputKey)
+            {
+                q = $"{it.Label()}\n바꿀 시간을 아래 칸에 적어 주세요 (예: 1131~1201).";
+                continue;
+            }
+            if (CareHelper.Kakao.Lists.ParseRange(a) is { } r) return r;
+            q = $"{it.Label()}\n'{a}' 은(는) 시간으로 읽지 못했어요. 1131~1201처럼 적어 주세요.\n⚠ {why}";
+        }
     }
 
     static async Task DeleteAsync(IPage page, Dialogs dlg, Item it, AskUser ask, Action<string> log)
@@ -244,14 +302,19 @@ public static class Runner
         var c = ps;
         if (it.Frm.Length > 0)
             c = c.Where(p => Overlap(p.From, p.To, it.Frm, it.To)).ToList();
+        string Day() => ps.Count == 0 ? "그날 일정이 없어요" : "그날 일정: " + string.Join(", ", ps.Select(Desc));
         if (it.Kind.Length > 0)
         {
+            // 적힌 서비스가 없으면 다른 서비스 일정을 지우지 않는다 (예전에는 그 시간의 다른 서비스를 지웠다, 2026-11-25)
             var byKind = c.Where(p => KindOf(p.Code) == it.Kind).ToList();
-            if (byKind.Count > 0) c = byKind;
+            if (byKind.Count == 0 && c.Count > 0)
+                throw new WorkError($"{it.Person} 어르신 {d:MM'/'dd} {it.Kind} 일정이 없어서 지우지 않았어요. {Day()}");
+            c = byKind;
         }
         if (c.Count == 0)
-            throw new WorkError($"{it.Person} 어르신 {d:MM'/'dd} 지울 일정을 찾지 못했어요.");
+            throw new WorkError($"{it.Person} 어르신 {d:MM'/'dd} 지울 일정을 찾지 못했어요. {Day()}");
         var p = c.Count == 1 ? c[0] : Pick(ask, $"{it.Label()}\n어느 일정을 지울까요?", c).Plan!;
         await DoDeleteAsync(page, dlg, it.Ic, it.Person, d, p.From, p.To, log);
+        it.Note = $"지움: {Desc(p)}" + (p.Result ? " · 실적도 함께 지움" : "");
     }
 }
