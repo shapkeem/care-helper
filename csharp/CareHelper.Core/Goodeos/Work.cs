@@ -206,9 +206,16 @@ public static class Work
                 seq: d.getAttribute('seq'), result: d.getAttribute('result_flag') == 'Y',
                 weekly: td.getAttribute('weekly')};
     }).filter(p=>p.weekly != 'W')");
-        return arr.EnumerateArray().Select(e => new PlanEntry(e.Str("date"), e.Str("from"), e.Str("to"), e.Str("person"),
-            e.Str("code"), e.Str("seq"), e.Bool("result"), e.Str("weekly"))).ToList();
+        return DedupePlans(arr.EnumerateArray().Select(e => new PlanEntry(e.Str("date"), e.Str("from"), e.Str("to"), e.Str("person"),
+            e.Str("code"), e.Str("seq"), e.Bool("result"), e.Str("weekly"))));
     }
+
+    /// <summary>일정 창을 다시 그리면 예전 칸과 새 칸이 함께 남아 같은 일정이 두 번 읽힐 때가 있다
+    /// (실적 없음·있음이 짝으로 읽혀 '같은 시간 일정이 여러 개예요'로 멈춤, 2026-11-27).
+    /// 날짜·어르신·번호(seq)·시간·서비스가 같으면 한 건으로 보고, 실적 있음으로 읽힌 쪽을 믿는다.</summary>
+    internal static List<PlanEntry> DedupePlans(IEnumerable<PlanEntry> plans) =>
+        plans.GroupBy(p => (p.Date, p.Person, p.Seq, p.From, p.To, p.Code))
+             .Select(g => g.FirstOrDefault(p => p.Result) ?? g.First()).ToList();
 
     public static async Task<List<PlanEntry>> FindPlansAsync(IPage page, string person, DateOnly d, string? frm = null, string? to = null,
                                                         string? kind = null)

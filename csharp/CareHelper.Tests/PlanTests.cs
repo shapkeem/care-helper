@@ -463,6 +463,33 @@ public class PlanTests
         Assert.Empty(ScanGrid(TRow("1200", "1250", "사사", "1A102", 20261125), b).Errors);
     }
 
+    /// <summary>같은 어르신 일정이 같은 시각에 시작하면 짧은 줄은 그대로 두고 긴 줄의 시작을 미룬다.
+    /// 시간이 똑같으면 아래 줄을 길이 그대로 뒤로, 서비스까지 같으면 두 번 들어간 줄로 묻는다. 옮길 자리가 없으면 직접 넣게 한다.</summary>
+    [Fact]
+    public void SameStartOverlapMovesLongerRow()
+    {
+        var job = ScanGrid(TRow("0900", "0910", "가가", "1A102", 20261125), TRow("0900", "1000", "가가", "43202", 20261125));
+        var p = Assert.Single(job.Proposals, x => x.Kind == "시간겹침");
+        Assert.Equal(3, p.RowLabel);
+        Assert.Equal("0900~1000", p.CurrentDisp);
+        Assert.Equal("0911~1000", p.SuggestedDisp);
+        Assert.Empty(job.Errors);
+
+        var same = ScanGrid(TRow("0900", "0910", "가가", "1A102", 20261125), TRow("0900", "0910", "가가", "43202", 20261125));
+        Assert.Equal("0911~0921", Assert.Single(same.Proposals, x => x.Kind == "시간겹침").SuggestedDisp);
+
+        var dup = ScanGrid(TRow("0900", "0910", "가가", "1A102", 20261125), TRow("0900", "0910", "가가", "1A102", 20261125));
+        Assert.Empty(dup.Proposals.Where(x => x.Kind == "시간겹침"));
+        Assert.Contains("똑같은 일정이 두 번", Assert.Single(dup.Errors));
+
+        var full = ScanGrid(TRow("0900", "0910", "가가", "1A102", 20261125), TRow("0900", "0910", "가가", "43202", 20261125),
+                            TRow("0911", "0930", "가가", "1A102", 20261125));
+        Assert.Empty(full.Proposals.Where(x => x.Kind == "시간겹침"));
+        var err = Assert.Single(full.Errors);
+        Assert.Contains("직접 넣어 주세요", err);
+        Assert.Equal(ColStart, full.ErrorCells[err].Col);
+    }
+
     /// <summary>실적 칸의 띄어쓰기만 든 칸은 비운다 (goodeos 가 실적 시간 0 으로 받았다). 너무 긴 전화는 시간을 묻는다.</summary>
     [Fact]
     public void SpaceCellsClearedAndLongPhoneAsked()

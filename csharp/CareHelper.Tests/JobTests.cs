@@ -147,6 +147,17 @@ public class JobTests
         Assert.False(Work.Overlap("1000", "1100", "1100", "1130"));
     }
 
+    /// <summary>일정 창을 다시 그려 같은 일정이 두 번 읽히면 한 건으로, 실적 있음 쪽을 믿는다. 번호가 다르면 따로 센다.</summary>
+    [Fact]
+    public void DedupePlansKeepsResultSide()
+    {
+        var a = new PlanEntry("20261125", "0900", "0910", "가가", "1A102", "28", false, "3");
+        var ps = Work.DedupePlans(new[] { a, a with { Result = true }, a with { Seq = "29" } });
+        Assert.Equal(2, ps.Count);
+        Assert.True(ps[0].Result);
+        Assert.Equal("29", ps[1].Seq);
+    }
+
     // ---------------------------------------------------------------- 상담지
     static readonly (string? A, string B, string C)[] Rows =
     {

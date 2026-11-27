@@ -394,7 +394,39 @@ public static class Scanner
                 int rlabel1 = rowNums[i1], rlabel2 = rowNums[i2];
                 var dateDisp = $"{d % 10000 / 100}월{d % 100}일";
                 // 고칠 때는 일정 사이를 꼭 1분 띄운다 (끝 0911 → 다음 시작 0912)
-                if (e2 >= e1)
+                if (s1 == s2)
+                {
+                    // 시작이 같으면 앞 줄 끝을 아무리 당겨도 겹친다 (예전엔 0910 → 0901 을 제안했다, 2026-11-27).
+                    // 짧은 줄(정렬상 앞)은 그대로 두고 긴 줄의 시작을 짧은 줄 끝 + 1분으로 미룬다. 둘이 똑같으면 아래 줄을 길이 그대로 뒤로.
+                    string T(int m) => MinutesToTime(m);
+                    if (e1 == e2 && CleanServiceCode(grid[i1][ColCode]) == CleanServiceCode(grid[i2][ColCode]))
+                    {
+                        job.Error(i2, ColStart, $"{rlabel2}행 {name} · {dateDisp} {T(s2)}~{T(e2)} — {rlabel1}행과 똑같은 일정이 두 번 있어요. " +
+                                                "하나를 지워 주세요");
+                        events.RemoveAt(k + 1);
+                        k--;
+                        continue;
+                    }
+                    int newS = e1 + 1, newE = e1 == e2 ? newS + (e2 - s2) : e2;
+                    bool clash = newE <= newS || events.Where((x, idx) => idx != k + 1).Any(x => newS < x.E + 1 && x.S < newE + 1);
+                    if (clash)
+                    {
+                        job.Error(i2, ColStart, $"{rlabel2}행 {name} · {dateDisp} {T(s2)}~{T(e2)} — {rlabel1}행({T(s1)}~{T(e1)})과 " +
+                                                "시작이 같아 뒤로 옮겨야 하는데, 옮길 자리가 다른 일정과 겹쳐요. 시간을 직접 넣어 주세요");
+                        events.RemoveAt(k + 1);
+                        k--;
+                        continue;
+                    }
+                    job.Proposals.Add(new FixProposal("시간겹침", label, rlabel2, name,
+                        $"{T(s2)}~{T(e2)}", $"{T(newS)}~{T(newE)}",
+                        e1 == e2
+                            ? $"{dateDisp} {rlabel1}행과 시간이 똑같아({T(s1)}~{T(e1)}) 바로 뒤로 옮김 (길이 그대로, 1분 띄움)"
+                            : $"{dateDisp} {rlabel1}행 {T(s1)}~{T(e1)}과 시작이 같아 시작을 뒤로 미룸 (1분 띄움)",
+                        new() { (i2, ColStart), (i2, ColEnd) }, TimeRangeBuilder));
+                    events[k + 1] = (newS, newE, i2);
+                    events.Sort();
+                }
+                else if (e2 >= e1)
                 {
                     int newE1 = Math.Max(s1 + 1, s2 - 1);
                     job.Proposals.Add(new FixProposal("시간겹침", label, rlabel1, name, MinutesToTime(e1), MinutesToTime(newE1),
